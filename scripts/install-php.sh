@@ -74,7 +74,6 @@ PHP_PACKAGES=(
     php-intl
     php-mysql
     php-gd
-    php-opcache
 )
 
 log "Updating Ubuntu package metadata..."
@@ -106,6 +105,24 @@ PHP_BIN="/usr/bin/php${PHP_VERSION}"
 
 [[ -x "${PHP_BIN}" ]] || fail "PHP ${PHP_VERSION} binary was not installed."
 
+if ! "${PHP_BIN}" -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'; then
+    OPCACHE_PACKAGE="php${PHP_VERSION}-opcache"
+    log "Installing ${OPCACHE_PACKAGE}..."
+
+    if ! apt-cache show "$OPCACHE_PACKAGE" >/dev/null 2>&1; then
+        fail "Zend OPcache is not loaded and ${OPCACHE_PACKAGE} is unavailable from the Ubuntu repositories."
+    fi
+
+    if ! "${ROOT_CMD[@]}" env DEBIAN_FRONTEND=noninteractive \
+        apt-get install -y "$OPCACHE_PACKAGE"; then
+        fail "Could not install ${OPCACHE_PACKAGE}."
+    fi
+fi
+
+if ! "${PHP_BIN}" -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'; then
+    fail "Zend OPcache is not loaded for PHP ${PHP_VERSION}."
+fi
+
 FPM_SERVICE="php${PHP_VERSION}-fpm"
 
 log "Enabling ${FPM_SERVICE}..."
@@ -119,7 +136,6 @@ if [[ "${INSTALLED_VERSION}" != "${PHP_VERSION}" ]]; then
     fail "Expected PHP ${PHP_VERSION}, but installed ${INSTALLED_VERSION}."
 fi
 
-log "PHP installation completed."
 log "Installed PHP version: ${INSTALLED_VERSION}"
 
 if command -v php >/dev/null 2>&1; then
@@ -143,3 +159,5 @@ if [[ -S "/run/php/php${PHP_VERSION}-fpm.sock" ]]; then
 else
     fail "Expected socket /run/php/php${PHP_VERSION}-fpm.sock was not found."
 fi
+
+log "PHP installation completed."
