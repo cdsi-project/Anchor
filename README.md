@@ -272,8 +272,8 @@ The target experience is:
 
 ```bash
 git clone <CDSI_REPOSITORY>
-cd cdsi
-sudo ./installer/install.sh
+cd cdsi-bootstrap
+sudo ./install.sh
 ```
 
 And eventually:
@@ -288,6 +288,25 @@ cdsi update
 The goal is to reduce infrastructure complexity so that owning an independent digital node does not require deep knowledge of Linux, Nginx, PHP, MySQL, Redis, SSL, Supervisor, queues, or deployment.
 
 > The infrastructure should be complex underneath, but simple for the creator.
+
+### Bootstrap Script Entry Points
+
+`install.sh` is the primary entry point and coordinates scripts under `scripts/`:
+
+```bash
+sudo ./install.sh
+```
+
+Each script under `scripts/` can also be run independently for focused operation or diagnosis:
+
+```bash
+bash scripts/check-env.sh
+sudo bash scripts/configure.sh
+bash scripts/health.sh
+sudo bash scripts/install-php.sh
+```
+
+Scripts that belong to a later milestone keep their current placeholder behavior until that milestone is implemented.
 
 ---
 

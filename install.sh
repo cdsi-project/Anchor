@@ -24,33 +24,30 @@ source "${CDSI_ROOT}/lib/logger.sh"
 # shellcheck source=lib/system.sh
 source "${CDSI_ROOT}/lib/system.sh"
 
-# ── Source Scripts ────────────────────────────────────────
-# shellcheck source=scripts/configure.sh
-source "${CDSI_ROOT}/scripts/configure.sh"
-# shellcheck source=scripts/check-env.sh
-source "${CDSI_ROOT}/scripts/check-env.sh"
-# shellcheck source=scripts/health.sh
-source "${CDSI_ROOT}/scripts/health.sh"
-# shellcheck source=scripts/install-nginx.sh
-source "${CDSI_ROOT}/scripts/install-nginx.sh"
-# shellcheck source=scripts/install-mysql.sh
-source "${CDSI_ROOT}/scripts/install-mysql.sh"
-# shellcheck source=scripts/install-php.sh
-source "${CDSI_ROOT}/scripts/install-php.sh"
-# shellcheck source=scripts/install-redis.sh
-source "${CDSI_ROOT}/scripts/install-redis.sh"
+# Scripts under scripts/ are standalone commands. The installer invokes them
+# as subprocesses so direct execution and orchestrated execution use the same
+# code path and exit-status contract.
 
 # ── Installer Metadata ─────────────────────────────────────
-readonly CDSI_INSTALLER_VERSION="0.2.0"
+readonly CDSI_INSTALLER_VERSION="0.3.0"
+readonly CDSI_COMPONENT_NOT_IMPLEMENTED=3
+readonly CDSI_PREFLIGHT_SCRIPT="${CDSI_ROOT}/scripts/check-env.sh"
 
 # ── Component Registry ─────────────────────────────────────
-# Parallel arrays: names, install functions, done flags.
+# Parallel arrays: names, descriptions, script paths, done flags.
 CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Redis")
 CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "Redis数据库")
-CDSI_COMP_FUNCS=("install_nginx" "install_mysql" "install_php" "install_redis")
+CDSI_COMP_SCRIPTS=(
+    "${CDSI_ROOT}/scripts/install-nginx.sh"
+    "${CDSI_ROOT}/scripts/install-mysql.sh"
+    "${CDSI_ROOT}/scripts/install-php.sh"
+    "${CDSI_ROOT}/scripts/install-redis.sh"
+)
 CDSI_COMP_DONE=()
+CDSI_COMP_UNAVAILABLE=()
 for _i in "${!CDSI_COMP_NAMES[@]}"; do
     CDSI_COMP_DONE[$_i]=false
+    CDSI_COMP_UNAVAILABLE[$_i]=false
 done
 unset _i
 
@@ -100,6 +97,10 @@ cdsi_show_menu() {
             printf "  %b%d%b  %-10s - %-12s %b[installed]%b\n" \
                 "${CLR_DIM}" "$num" "${CLR_RESET}" "$name" "$desc" \
                 "${CLR_GREEN}" "${CLR_RESET}"
+        elif [[ "${CDSI_COMP_UNAVAILABLE[$i]}" == true ]]; then
+            printf "  %b%d%b  %-10s - %-12s %b[planned]%b\n" \
+                "${CLR_DIM}" "$num" "${CLR_RESET}" "$name" "$desc" \
+                "${CLR_YELLOW}" "${CLR_RESET}"
         else
             printf "  %b%d%b  %-10s - %s\n" \
                 "${CLR_BOLD}" "$num" "${CLR_RESET}" "$name" "$desc"
@@ -111,30 +112,54 @@ cdsi_show_menu() {
 }
 
 # Run a single component install by index.
+# Executes the component's install script as a subprocess.
 # Args: <index 0-based>
 cdsi_install_component() {
     local idx="$1"
     local name="${CDSI_COMP_NAMES[$idx]}"
-    local func="${CDSI_COMP_FUNCS[$idx]}"
+    local script="${CDSI_COMP_SCRIPTS[$idx]}"
+    local rc=0
 
     if [[ "${CDSI_COMP_DONE[$idx]}" == true ]]; then
         log_info "${name} already installed — skipping."
         return 0
     fi
 
+    if [[ "${CDSI_COMP_UNAVAILABLE[$idx]}" == true ]]; then
+        log_warning "${name} installation is planned for a later milestone."
+        return 0
+    fi
+
+    if [[ ! -f "$script" ]]; then
+        log_error "Install script not found: $script"
+        return 1
+    fi
+
     CDSI_CURRENT_STAGE="INSTALL_${name^^}"
     log_info "Installing ${name}..."
-    "$func"
-    CDSI_COMP_DONE[$idx]=true
-    log_success "${name} installation complete."
-    CDSI_CURRENT_STAGE="MENU"
+    if bash "$script"; then
+        CDSI_COMP_DONE[$idx]=true
+        log_success "${name} installation complete."
+        CDSI_CURRENT_STAGE="MENU"
+        return 0
+    else
+        rc=$?
+        if [[ "$rc" -eq "$CDSI_COMPONENT_NOT_IMPLEMENTED" ]]; then
+            CDSI_COMP_UNAVAILABLE[$idx]=true
+            log_warning "${name} installation is not implemented in the current milestone."
+            CDSI_CURRENT_STAGE="MENU"
+            return 0
+        fi
+        log_error "${name} installation failed (exit code ${rc})."
+        return "$rc"
+    fi
 }
 
 # Install all remaining components in order.
 cdsi_install_all() {
     local i
     for i in "${!CDSI_COMP_NAMES[@]}"; do
-        if [[ "${CDSI_COMP_DONE[$i]}" != true ]]; then
+        if [[ "${CDSI_COMP_DONE[$i]}" != true && "${CDSI_COMP_UNAVAILABLE[$i]}" != true ]]; then
             cdsi_install_component "$i"
         fi
     done
@@ -151,6 +176,8 @@ cdsi_summary() {
         local name="${CDSI_COMP_NAMES[$i]}"
         if [[ "${CDSI_COMP_DONE[$i]}" == true ]]; then
             printf "  %b✓%b  %s\n" "${CLR_GREEN}" "${CLR_RESET}" "$name"
+        elif [[ "${CDSI_COMP_UNAVAILABLE[$i]}" == true ]]; then
+            printf "  %b○%b  %s (planned)\n" "${CLR_YELLOW}" "${CLR_RESET}" "$name"
         else
             printf "  %b○%b  %s\n" "${CLR_DIM}" "${CLR_RESET}" "$name"
             all_done=false
@@ -158,7 +185,7 @@ cdsi_summary() {
     done
     log_separator
     if [[ "$all_done" == true ]]; then
-        log_success "All components installed."
+        log_success "All available components installed."
     else
         log_info "Some components were not installed. Re-run to install them."
     fi
@@ -180,7 +207,11 @@ main() {
     log_info "Running preflight checks..."
 
     local pf_status=0
-    preflight_run || pf_status=$?
+    if bash "$CDSI_PREFLIGHT_SCRIPT"; then
+        pf_status=0
+    else
+        pf_status=$?
+    fi
 
     case "$pf_status" in
         0)
@@ -195,16 +226,34 @@ main() {
             log_info "Log: ${CDSI_LOG_FILE}"
             exit 1
             ;;
+        *)
+            log_error "Preflight script failed unexpectedly (exit code ${pf_status})."
+            log_blank
+            log_info "Log: ${CDSI_LOG_FILE}"
+            exit "$pf_status"
+            ;;
     esac
 
     # ── Interactive Install Menu ──
     CDSI_CURRENT_STAGE="MENU"
 
+    # Require an interactive terminal for the selection menu.
+    if [[ ! -t 0 ]]; then
+        log_error "Interactive terminal required for component selection."
+        log_info  "If running via SSH, use:  ssh -t user@host 'cd /path && ./install.sh'"
+        log_info  "Log: ${CDSI_LOG_FILE}"
+        exit 1
+    fi
+
     while true; do
         cdsi_show_menu
 
         local choice=""
-        read -r choice || choice="q"
+        if ! read -r choice; then
+            log_blank
+            log_info "Input closed. Exiting installer menu."
+            break
+        fi
 
         case "$choice" in
             0)

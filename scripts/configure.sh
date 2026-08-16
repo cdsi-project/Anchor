@@ -6,18 +6,15 @@
 # M1: Framework only — actual usage begins in M2.
 # ═══════════════════════════════════════════════════════════════
 
-# Prevent direct execution.
-[[ "${BASH_SOURCE[0]}" == "${0}" ]] && {
-    echo "This file is a library, not meant to be run directly." >&2
-    exit 1
-}
+# Function definitions remain sourceable, while direct execution runs
+# configure_main at the bottom of the file.
 
 # ── Config Directory ───────────────────────────────────────
 
 # Ensure the CDSI config directory exists with correct permissions.
 config_init() {
-    mkdir -p "${CDSI_CONFIG_DIR}" 2>/dev/null || true
-    chmod 755 "${CDSI_CONFIG_DIR}" 2>/dev/null || true
+    mkdir -p "${CDSI_CONFIG_DIR}"
+    chmod 755 "${CDSI_CONFIG_DIR}"
 }
 
 # ── cdsi.conf Read / Write ─────────────────────────────────
@@ -74,9 +71,9 @@ generate_secret() {
 secrets_init() {
     config_init
     if [[ ! -f "${CDSI_SECRETS_FILE}" ]]; then
-        touch "${CDSI_SECRETS_FILE}" 2>/dev/null || true
+        touch "${CDSI_SECRETS_FILE}"
     fi
-    chmod 600 "${CDSI_SECRETS_FILE}" 2>/dev/null || true
+    chmod 600 "${CDSI_SECRETS_FILE}"
 }
 
 # Write a secret to the secrets file (KEY=VALUE format).
@@ -102,3 +99,69 @@ secrets_get() {
     fi
     echo "$value"
 }
+
+# ── Standalone Entry Point ────────────────────────────────
+
+_configure_load_runtime() {
+    local cdsi_root
+    cdsi_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    # shellcheck source=../lib/common.sh
+    source "${cdsi_root}/lib/common.sh"
+    # shellcheck source=../lib/logger.sh
+    source "${cdsi_root}/lib/logger.sh"
+}
+
+configure_usage() {
+    printf 'Usage: sudo bash scripts/configure.sh [init]\n'
+    printf '\n'
+    printf 'Initialize the CDSI configuration directory and secrets file.\n'
+}
+
+configure_main() {
+    local command="${1:-init}"
+
+    case "$command" in
+        -h|--help|help)
+            configure_usage
+            return 0
+            ;;
+        init)
+            ;;
+        *)
+            printf 'Unknown command: %s\n' "$command" >&2
+            configure_usage >&2
+            return 2
+            ;;
+    esac
+
+    logger_init
+
+    if ! check_root; then
+        log_error "Configuration initialization requires root privileges."
+        log_info "Run: sudo bash scripts/configure.sh init"
+        return 1
+    fi
+
+    if ! config_init; then
+        log_error "Could not initialize ${CDSI_CONFIG_DIR}."
+        return 1
+    fi
+
+    if ! secrets_init; then
+        log_error "Could not initialize ${CDSI_SECRETS_FILE}."
+        return 1
+    fi
+
+    log_success "CDSI configuration initialized."
+    log_info "Config directory: ${CDSI_CONFIG_DIR}"
+    log_info "Secrets file: ${CDSI_SECRETS_FILE}"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    set -Eeuo pipefail
+    _configure_load_runtime
+    configure_status=0
+    configure_main "$@" || configure_status=$?
+    exit "$configure_status"
+fi

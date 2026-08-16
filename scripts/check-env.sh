@@ -5,16 +5,19 @@
 # M1 Core: this is the primary deliverable of Milestone 1.
 # ═══════════════════════════════════════════════════════════════
 
-# Prevent direct execution.
-[[ "${BASH_SOURCE[0]}" == "${0}" ]] && {
-    echo "This file is a library, not meant to be run directly." >&2
-    exit 1
-}
+# Function definitions remain sourceable, while direct execution runs
+# check_env_main at the bottom of the file.
 
 # ── Status Constants ───────────────────────────────────────
-readonly PF_OK="OK"
-readonly PF_WARN="WARNING"
-readonly PF_FAIL="ERROR"
+if [[ -z "${PF_OK+x}" ]]; then
+    readonly PF_OK="OK"
+fi
+if [[ -z "${PF_WARN+x}" ]]; then
+    readonly PF_WARN="WARNING"
+fi
+if [[ -z "${PF_FAIL+x}" ]]; then
+    readonly PF_FAIL="ERROR"
+fi
 
 # Track overall preflight status.
 # 0 = all OK, 1 = has warnings, 2 = has errors.
@@ -187,13 +190,15 @@ pf_check_port() {
 }
 
 pf_check_apt() {
-    local status
+    local status value
     if check_apt; then
         status="$PF_OK"
+        value="Available"
     else
         status="$PF_FAIL"
+        value="Not Available"
     fi
-    pf_print_result "apt" "Available" "$status"
+    pf_print_result "apt" "$value" "$status"
     pf_update_status "$status"
 }
 
@@ -222,6 +227,8 @@ pf_check_service() {
 # Run all preflight checks and output formatted results.
 # Returns: 0 if ready, 1 if warnings, 2 if errors.
 preflight_run() {
+    preflight_overall_status=0
+
     log_blank
     printf "  %bCDSI Preflight Check%b\n" "${CLR_BOLD}" "${CLR_RESET}"
     log_separator
@@ -277,3 +284,50 @@ preflight_run() {
 
     return "$preflight_overall_status"
 }
+
+# ── Standalone Entry Point ────────────────────────────────
+
+_check_env_load_runtime() {
+    local cdsi_root
+    cdsi_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    # shellcheck source=../lib/common.sh
+    source "${cdsi_root}/lib/common.sh"
+    # shellcheck source=../lib/logger.sh
+    source "${cdsi_root}/lib/logger.sh"
+    # shellcheck source=../lib/system.sh
+    source "${cdsi_root}/lib/system.sh"
+}
+
+check_env_usage() {
+    printf 'Usage: bash scripts/check-env.sh\n'
+    printf '\n'
+    printf 'Run the CDSI preflight checks without starting the installer.\n'
+}
+
+check_env_main() {
+    case "${1:-}" in
+        -h|--help|help)
+            check_env_usage
+            return 0
+            ;;
+        '')
+            ;;
+        *)
+            printf 'Unknown argument: %s\n' "$1" >&2
+            check_env_usage >&2
+            return 2
+            ;;
+    esac
+
+    logger_init
+    preflight_run
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    set -Eeuo pipefail
+    _check_env_load_runtime
+    check_env_status=0
+    check_env_main "$@" || check_env_status=$?
+    exit "$check_env_status"
+fi
