@@ -308,6 +308,10 @@ sudo bash scripts/install-php.sh
 
 Scripts that belong to a later milestone keep their current placeholder behavior until that milestone is implemented.
 
+The PHP installer uses the default PHP packages from the supported Ubuntu
+repositories. It does not add a third-party PHP PPA or replace an existing
+global PHP alternative.
+
 ---
 
 ## Repository Direction
