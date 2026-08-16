@@ -1,0 +1,22 @@
+# === Local AI workspace (WorkBuddy session data) ===
+.workbuddy/
+
+# === Generated binaries (derived from .md sources) ===
+# PDF exports are generated artifacts; keep sources in git only
+*.pdf
+
+# === Runtime / secrets (M2+ installer output) ===
+.env
+.env.*
+*.log
+storage/
+vendor/
+node_modules/
+
+# === OS / editor noise ===
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

@@ -1,0 +1,16 @@
+# Shell scripts MUST keep LF — CRLF breaks bash on Linux servers
+*.sh text eol=lf
+
+# Markdown: normalize to LF
+*.md text eol=lf
+
+# Git metadata
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Plain text files
+LICENSE text eol=lf
+NOTICE text eol=lf
+
+# Binary
+*.pdf binary
