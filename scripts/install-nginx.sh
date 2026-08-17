@@ -61,6 +61,18 @@ for source_file in \
     fi
 done
 
+# ── Idempotency: skip if already installed, configured, and running ──
+# Re-running the installer should not re-validate and re-enable Nginx when
+# nothing needs to change. We only skip when the service is healthy.
+if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
+    if "${ROOT_CMD[@]}" nginx -t >/dev/null 2>&1; then
+        log "Nginx is already installed, its configuration is valid, and the service is running."
+        log "Skipping installation."
+        nginx -v 2>&1 | sed 's/^/  /'
+        exit 0
+    fi
+fi
+
 # Preserve an existing broken configuration instead of starting a package
 # operation that may reload it.
 if command -v nginx >/dev/null 2>&1; then

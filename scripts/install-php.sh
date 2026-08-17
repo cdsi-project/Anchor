@@ -122,6 +122,23 @@ for source_file in \
     fi
 done
 
+# ── Idempotency: skip if PHP-FPM is already installed and running ──
+# The step functions below are individually idempotent, but re-running the
+# full apt-get install + service enable on every invocation is wasteful and
+# noisy. Only fall through to a real install when something is actually missing.
+if command -v php >/dev/null 2>&1; then
+    _cur="$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || true)"
+    if [[ -n "$_cur" ]] \
+       && command -v "php-fpm${_cur}" >/dev/null 2>&1 \
+       && systemctl is-active --quiet "php${_cur}-fpm" 2>/dev/null \
+       && php -m 2>/dev/null | grep -qi 'mysqli'; then
+        log "PHP ${_cur} (php-fpm + core extensions) is already installed and running."
+        log "Skipping installation."
+        php -v 2>&1 | head -1 | sed 's/^/  /'
+        exit 0
+    fi
+fi
+
 log "Installing the Ubuntu default PHP version on ${PRETTY_NAME:-Ubuntu}..."
 
 PHP_PACKAGES=(
