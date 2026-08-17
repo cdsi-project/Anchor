@@ -14,3 +14,4 @@ NOTICE text eol=lf
 
 # Binary
 *.pdf binary
+*.phar binary

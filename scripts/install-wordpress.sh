@@ -102,6 +102,17 @@ install_wpcli() {
         log "wp-cli already present."
         return 0
     fi
+    # Prefer a bundled wp-cli.phar shipped in scripts/ (avoids CN-region
+    # truncation when fetching from GitHub raw / jsDelivr over SSH).
+    local bundled="${SCRIPT_DIR}/wp-cli.phar"
+    if [[ -s "$bundled" ]] && [[ $(wc -c < "$bundled") -gt 1000000 ]]; then
+        log "Using bundled wp-cli.phar from scripts/ ..."
+        ${SUDO} cp "$bundled" /usr/local/bin/wp
+        ${SUDO} chmod +x /usr/local/bin/wp
+        command -v wp >/dev/null 2>&1 || fail "wp-cli install from bundled phar failed."
+        log_ok "wp-cli installed from bundled phar."
+        return 0
+    fi
     log "Installing wp-cli..."
     # GitHub raw is sometimes unreachable (e.g. CN regions); fall back to jsDelivr CDN.
     local urls=(
