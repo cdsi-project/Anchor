@@ -115,9 +115,10 @@ install_wpcli() {
         return 0
     fi
     log "Installing wp-cli..."
-    # GitHub raw is sometimes unreachable (e.g. CN regions); fall back to jsDelivr CDN.
+    # Primary mirror: cdn.aicsi.cn (reliable in CN regions). jsDelivr kept as a
+    # secondary fallback in case the CDN is unreachable.
     local urls=(
-        "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
+        "http://cdn.aicsi.cn/packages/wp-cli.phar"
         "https://cdn.jsdelivr.net/gh/wp-cli/builds@gh-pages/phar/wp-cli.phar"
     )
     local ok=0
