@@ -35,8 +35,8 @@ readonly CDSI_PREFLIGHT_SCRIPT="${CDSI_ROOT}/scripts/check-env.sh"
 
 # ── Component Registry ─────────────────────────────────────
 # Parallel arrays: names, descriptions, script paths, done flags.
-CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Redis" "Supervisor" "Certbot")
-CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "Redis数据库" "进程守护" "SSL证书")
+CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Redis" "Supervisor" "Certbot" "WordPress")
+CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "Redis数据库" "进程守护" "SSL证书" "WordPress站点")
 CDSI_COMP_SCRIPTS=(
     "${CDSI_ROOT}/scripts/install-nginx.sh"
     "${CDSI_ROOT}/scripts/install-mysql.sh"
@@ -44,6 +44,7 @@ CDSI_COMP_SCRIPTS=(
     "${CDSI_ROOT}/scripts/install-redis.sh"
     "${CDSI_ROOT}/scripts/install-supervisor.sh"
     "${CDSI_ROOT}/scripts/install-certbot.sh"
+    "${CDSI_ROOT}/scripts/install-wordpress.sh"
 )
 CDSI_COMP_DONE=()
 CDSI_COMP_UNAVAILABLE=()
