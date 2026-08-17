@@ -41,7 +41,7 @@ fi
 # ── Paths / Config ────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PASS_DIR="$(cd "${CDSI_ROOT}/password" && pwd)"
+PASS_DIR="${CDSI_ROOT}/password"
 MYSQL_PASS_FILE="${PASS_DIR}/mysql.pass"
 WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
 

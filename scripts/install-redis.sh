@@ -32,7 +32,7 @@ fi
 
 # ── Paths ──────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PASS_DIR="$(cd "${SCRIPT_DIR}/../password" && pwd)"
+PASS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/password"
 PASS_FILE="${PASS_DIR}/redis.pass"
 REDIS_CONF="/etc/redis/redis.conf"
 

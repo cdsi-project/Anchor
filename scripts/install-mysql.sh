@@ -40,7 +40,7 @@ fi
 
 # ── Paths ──────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PASS_DIR="$(cd "${SCRIPT_DIR}/../password" && pwd)"
+PASS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/password"
 PASS_FILE="${PASS_DIR}/mysql.pass"
 
 DB_NAME="cdsi"
