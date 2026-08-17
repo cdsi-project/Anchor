@@ -47,8 +47,9 @@ WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
 
 WEB_ROOT="/var/www"
 WP_DIR="${WEB_ROOT}/wordpress"
-NGINX_CONF="/etc/nginx/sites-available/wordpress"
-NGINX_ENABLED="/etc/nginx/sites-enabled/wordpress"
+# Nginx site-block path is computed inside configure_nginx() as <domain>.conf
+# (falls back to 'wordpress.conf' when no domain is set), so the file name is
+# unified as the domain instead of a generic 'wordpress'.
 
 DB_NAME="cdsi"
 DB_USER="cdsi"
@@ -263,13 +264,23 @@ install_core() {
 # 5) Nginx server block → php-fpm
 # ══════════════════════════════════════════════════════════
 configure_nginx() {
-    local phpver sock
+    local phpver sock site_name conf_path enabled_path conf
     phpver="$(detect_php_fpm)"
     sock="/run/php/php${phpver}-fpm.sock"
 
-    log "Configuring Nginx server block for ${WP_URL} → ${WP_DIR} (php-fpm ${phpver})..."
+    # Unified site-block file name: <domain>.conf (or 'wordpress.conf' when no
+    # domain is provided). Migrate away any legacy 'wordpress' block so the
+    # name is consistent and there is exactly one WordPress server block.
+    site_name="${WP_DOMAIN:-wordpress}"
+    conf_path="/etc/nginx/sites-available/${site_name}.conf"
+    enabled_path="/etc/nginx/sites-enabled/${site_name}.conf"
+    if [[ "${site_name}" != "wordpress" ]]; then
+        ${SUDO} rm -f /etc/nginx/sites-available/wordpress \
+                     /etc/nginx/sites-enabled/wordpress
+    fi
 
-    local conf
+    log "Configuring Nginx server block (${site_name}.conf) → ${WP_DIR} (php-fpm ${phpver})..."
+
     conf="$(cat <<EOF
 server {
     listen 80;
@@ -297,12 +308,12 @@ server {
 }
 EOF
 )"
-    printf '%s\n' "$conf" | ${SUDO} tee "$NGINX_CONF" >/dev/null
-    ${SUDO} ln -sf "$NGINX_CONF" "$NGINX_ENABLED"
+    printf '%s\n' "$conf" | ${SUDO} tee "$conf_path" >/dev/null
+    ${SUDO} ln -sf "$conf_path" "$enabled_path"
 
     ${SUDO} nginx -t || fail "nginx -t failed; server block has errors."
     ${SUDO} systemctl reload nginx || fail "Failed to reload nginx."
-    log_ok "Nginx reloaded with WordPress server block."
+    log_ok "Nginx reloaded with WordPress server block (${site_name}.conf)."
 }
 
 # ── Align WordPress site URL with the configured WP_URL ──

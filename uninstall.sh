@@ -149,7 +149,11 @@ _mysql_root() {
 
 uninstall_nginx() {
     log "── 卸载 Nginx ──"
-    if [[ -d /var/www/wordpress || -f /etc/nginx/sites-enabled/wordpress ]]; then
+    local d=""
+    d="$(cat "${CDSI_ROOT}/config/domain" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    if [[ -d /var/www/wordpress ]] \
+       || [[ -f /etc/nginx/sites-enabled/wordpress ]] \
+       || { [[ -n "$d" ]] && [[ -f "/etc/nginx/sites-enabled/${d}.conf" ]]; }; then
         log_warn "检测到 WordPress 站点仍在 /etc/nginx，建议先卸载 WordPress (或一并卸载全部)。"
     fi
     stop_disable_svc nginx
@@ -267,8 +271,17 @@ uninstall_certbot() {
 
 uninstall_wordpress() {
     log "── 卸载 WordPress ──"
-    do_rm /etc/nginx/sites-available/wordpress
-    do_rm /etc/nginx/sites-enabled/wordpress
+    # Remove the Nginx site block — both the legacy 'wordpress' name and the
+    # unified <domain>.conf produced by install-wordpress.sh.
+    local d=""
+    d="$(cat "${CDSI_ROOT}/config/domain" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    for n in wordpress "${d}"; do
+        [[ -z "$n" ]] && continue
+        do_rm "/etc/nginx/sites-available/${n}.conf"
+        do_rm "/etc/nginx/sites-enabled/${n}.conf"
+        do_rm "/etc/nginx/sites-available/${n}"
+        do_rm "/etc/nginx/sites-enabled/${n}"
+    done
     if command -v nginx >/dev/null 2>&1 && [[ "$DRY_RUN" != true ]]; then
         "${SUDO[@]}" nginx -t 2>/dev/null && "${SUDO[@]}" systemctl reload nginx 2>/dev/null || true
     fi

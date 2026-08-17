@@ -157,28 +157,31 @@ _update_server_name() {
 }
 _update_server_name
 
-# ── Issue certificate (idempotent) ─────────────────────────
+# ── Issue / re-apply certificate (idempotent) ──────────────
+# certbot --nginx is safe to re-run: when a valid cert already exists it is
+# reused (no new issuance) while the Nginx SSL configuration is re-applied.
+# This lets a WordPress re-install "re-check" and re-wire the TLS server block.
 CERT_DIR="/etc/letsencrypt/live/${PRIMARY_DOMAIN}"
+DNS_ARGS=()
+for d in "${DOMAINS[@]}"; do
+    DNS_ARGS+=( -d "$d" )
+done
 if [[ -d "$CERT_DIR" ]]; then
-    log "Certificate for ${PRIMARY_DOMAIN} already exists — skipping issuance."
+    log "Certificate for ${PRIMARY_DOMAIN} already exists — re-applying Nginx SSL config (no new issuance)."
     log_ok "Existing cert: $(${SUDO} openssl x509 -in "${CERT_DIR}/fullchain.pem" -noout -enddate 2>/dev/null | sed 's/notAfter=//')"
 else
     log "Obtaining certificate via certbot --nginx (this performs the ACME HTTP-01 challenge)..."
-    DNS_ARGS=()
-    for d in "${DOMAINS[@]}"; do
-        DNS_ARGS+=( -d "$d" )
-    done
-    ${SUDO} certbot --nginx \
-        "${DNS_ARGS[@]}" \
-        --non-interactive \
-        --agree-tos \
-        --email "${EMAIL}" \
-        --no-eff-email \
-        --redirect \
-        --key-type rsa \
-        || fail "certbot failed to obtain the certificate. Check DNS (A record → this server) and that port 80 is reachable."
-    log_ok "Certificate issued for: ${DOMAINS[*]}"
 fi
+${SUDO} certbot --nginx \
+    "${DNS_ARGS[@]}" \
+    --non-interactive \
+    --agree-tos \
+    --email "${EMAIL}" \
+    --no-eff-email \
+    --redirect \
+    --key-type rsa \
+    || fail "certbot failed to obtain/apply the certificate. Check DNS (A record → this server) and that port 80 is reachable."
+log_ok "Nginx SSL configuration applied for: ${DOMAINS[*]}"
 
 # ── Enable auto-renewal ───────────────────────────────────
 if ${SUDO} systemctl list-unit-files certbot.timer >/dev/null 2>&1; then
