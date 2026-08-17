@@ -102,13 +102,16 @@ purge_packages() {
         || log_warn "apt-get purge 部分包失败 (继续)"
 }
 
-# Purge every installed package matching a dpkg glob (e.g. 'nginx*').
+# Purge every *installed* package matching a dpkg glob (e.g. 'nginx*').
+# Only packages with status "install ok installed" are touched, so a glob
+# never removes unrelated packages that merely exist in the apt cache.
 purge_glob() {
     local pattern="$1"
     local pkgs
-    pkgs="$(dpkg-query -W -f='${Package}\n' "$pattern" 2>/dev/null | grep -E "^${pattern%[*]}" || true)"
+    pkgs="$(dpkg-query -W -f='${Package} ${Status}\n' "$pattern" 2>/dev/null \
+            | awk '$NF=="installed"{print $1}' || true)"
     if [[ -z "$pkgs" ]]; then
-        log "  (无匹配 $pattern 的包，跳过)"
+        log "  (无匹配 $pattern 的已安装包，跳过)"
         return 0
     fi
     if [[ "$DRY_RUN" == true ]]; then
@@ -173,13 +176,27 @@ uninstall_mysql() {
 
 uninstall_php() {
     log "── 卸载 PHP-FPM ──"
+    # Learn the installed PHP version (default 'php' first, else from php-fpm pkg).
     local ver=""
     ver="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true)"
+    if [[ -z "$ver" ]]; then
+        ver="$(dpkg-query -W -f='${Package}\n' 'php*-fpm' 2>/dev/null | head -1 | sed -E 's/^php([0-9]+\.[0-9]+)-fpm$/\1/')"
+    fi
     if [[ -n "$ver" ]]; then
         stop_disable_svc "php${ver}-fpm"
     fi
-    purge_glob 'php*'
-    log_ok "PHP 已卸载 (php-cli / php-fpm / 扩展 / php-common 全部移除)。"
+    # Curated list = exactly what install-php.sh provisions (plus versioned forms).
+    # Avoids a broad 'php*' glob that could remove unrelated PHP packages.
+    local pkgs=(php-cli php-fpm php-common php-curl php-mbstring php-xml php-zip \
+                php-bcmath php-intl php-mysql php-opcache php-redis php-gd php-imagick)
+    if [[ -n "$ver" ]]; then
+        pkgs+=( "php${ver}-fpm" "php${ver}-cli" "php${ver}-common" "php${ver}-opcache" \
+                 "php${ver}-curl" "php${ver}-mbstring" "php${ver}-xml" "php${ver}-zip" \
+                 "php${ver}-bcmath" "php${ver}-intl" "php${ver}-mysql" "php${ver}-redis" \
+                 "php${ver}-gd" "php${ver}-imagick" )
+    fi
+    purge_packages "${pkgs[@]}"
+    log_ok "PHP 已卸载 (仅移除 CDSI 安装的 php 包)。"
 }
 
 uninstall_redis() {
