@@ -224,12 +224,16 @@ cdsi_post_install_report() {
         svc_list+=( "$fpm_svc" )
     fi
 
-    # MySQL or MariaDB (whichever is installed).
-    if systemctl list-unit-files --type=service --no-legend 2>/dev/null | grep -q '^mysql\.service'; then
-        svc_list+=( "mysql" )
-    elif systemctl list-unit-files --type=service --no-legend 2>/dev/null | grep -q '^mariadb\.service'; then
-        svc_list+=( "mariadb" )
-    fi
+    # MySQL or MariaDB (whichever is installed) — detect by active/enabled
+    # status rather than grepping list-unit-files (more robust across shells).
+    local db_svc=""
+    for cand in mysql mariadb mysqld; do
+        if systemctl is-active --quiet "$cand" 2>/dev/null || systemctl is-enabled --quiet "$cand" 2>/dev/null; then
+            db_svc="$cand"
+            break
+        fi
+    done
+    [[ -n "$db_svc" ]] && svc_list+=( "$db_svc" )
     svc_list+=( "redis-server" "supervisor" )
 
     for svc in "${svc_list[@]}"; do
