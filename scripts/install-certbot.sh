@@ -192,6 +192,11 @@ if [[ -d "$CERT_DIR" ]]; then
 else
     log "Obtaining certificate via certbot --nginx (this performs the ACME HTTP-01 challenge)..."
 fi
+
+# Capture certbot output so we can detect Let's Encrypt rate-limit errors and
+# degrade gracefully (keep HTTP-only) instead of aborting the whole install.
+CERTBOT_LOG="$(mktemp)"
+set +e
 ${SUDO} certbot --nginx \
     "${DNS_ARGS[@]}" \
     --non-interactive \
@@ -200,7 +205,31 @@ ${SUDO} certbot --nginx \
     --no-eff-email \
     --redirect \
     --key-type rsa \
-    || fail "certbot failed to obtain/apply the certificate. Check DNS (A record → this server) and that port 80 is reachable."
+    2>&1 | tee "$CERTBOT_LOG"
+CERTBOT_RC="${PIPESTATUS[0]}"
+set -e
+
+if [[ "$CERTBOT_RC" -ne 0 ]]; then
+    # Detect Let's Encrypt rate-limit, e.g.:
+    #   "too many certificates (5) already issued for this exact set of
+    #    identifiers in the last 168h0m0s, retry after 2026-08-18 20:52:38 UTC"
+    # In that case the site stays HTTP-only; user re-runs certbot after cooldown.
+    if grep -qiE "too many certificates|rate.?limit|retry after" "$CERTBOT_LOG"; then
+        _retry="$(grep -oiE 'retry after [^:,]*' "$CERTBOT_LOG" | head -1 || true)"
+        log_fail "Let's Encrypt rate limit reached — certificate NOT issued."
+        [[ -n "$_retry" ]] && log_fail "  ${_retry}"
+        log_fail "  The site stays HTTP-only for now. After the cooldown, re-run:"
+        log_fail "    bash scripts/install-certbot.sh"
+        log_fail "  Existing Nginx HTTP config is preserved; no rollback needed."
+        rm -f "$CERTBOT_LOG"
+        exit 0
+    fi
+    echo "--- certbot output (tail) ---" >&2
+    tail -20 "$CERTBOT_LOG" >&2 || true
+    rm -f "$CERTBOT_LOG"
+    fail "certbot failed to obtain/apply the certificate (exit ${CERTBOT_RC}). Check DNS (A record → this server) and that port 80 is reachable."
+fi
+rm -f "$CERTBOT_LOG"
 log_ok "Nginx SSL configuration applied for: ${DOMAINS[*]}"
 
 # ── Enable auto-renewal ───────────────────────────────────
