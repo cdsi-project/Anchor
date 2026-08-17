@@ -412,6 +412,13 @@ main() {
                 ;;
             3)
                 cdsi_view_passwords
+                # Keep the credentials on screen until the user dismisses them,
+                # otherwise the next menu render would clear them instantly.
+                printf "  %b按任意键返回主菜单...%b" "${CLR_BOLD}" "${CLR_RESET}"
+                local _back=""
+                if read -r -n1 -s _back 2>/dev/null; then
+                    echo
+                fi
                 ;;
             [qQ])
                 break
