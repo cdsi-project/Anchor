@@ -302,6 +302,15 @@ EOF
     printf '%s\n' "$conf" | ${SUDO} tee "$conf_path" >/dev/null
     ${SUDO} ln -sf "$conf_path" "$enabled_path"
 
+    # Disable the stock 'default' site once our domain block is enabled. The
+    # default site ships with a catch-all server_name (_) and, if certbot ever
+    # injected a TLS block into it, a duplicate server_name <domain> would
+    # cause "conflicting server name ... ignored" and break the domain config.
+    # Removing it keeps this block the sole handler for the domain.
+    if [[ "$(basename "$enabled_path")" != "default" ]]; then
+        ${SUDO} rm -f /etc/nginx/sites-enabled/default
+    fi
+
     ${SUDO} nginx -t || fail "nginx -t failed; server block has errors."
     ${SUDO} systemctl reload nginx || fail "Failed to reload nginx."
     log_ok "Nginx reloaded with WordPress server block (${site_name}.conf)."
