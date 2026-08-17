@@ -196,6 +196,116 @@ cdsi_summary() {
     log_info "Log: ${CDSI_LOG_FILE}"
 }
 
+# Post-install verification report: service status, site URLs, frontend
+# reachability, and credentials. Printed after a full install, then the
+# installer exits. Robust to missing services / unset domain.
+cdsi_post_install_report() {
+    log_blank
+    log_separator
+    printf "  %b安装完成验收报告 / Post-Install Verification%b\n" "${CLR_BOLD}" "${CLR_RESET}"
+    log_separator
+
+    # ── 1. Service status ──
+    printf "\n  %b服务状态 / Service Status%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
+    local svc state
+    local -a svc_list=()
+    svc_list+=( "nginx" )
+
+    # Detect the PHP-FPM service name (version-dependent).
+    local fpm_svc=""
+    if command -v php >/dev/null 2>&1; then
+        fpm_svc="php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)-fpm"
+    fi
+    if [[ -z "$fpm_svc" ]]; then
+        fpm_svc="$(systemctl list-units --type=service --state=running --no-legend --no-pager 2>/dev/null \
+            | awk '{print $1}' | grep -m1 'php[0-9].*-fpm\.service' | sed 's/\.service$//' || true)"
+    fi
+    if [[ -n "$fpm_svc" ]]; then
+        svc_list+=( "$fpm_svc" )
+    fi
+
+    # MySQL or MariaDB (whichever is installed).
+    if systemctl list-unit-files --type=service --no-legend 2>/dev/null | grep -q '^mysql\.service'; then
+        svc_list+=( "mysql" )
+    elif systemctl list-unit-files --type=service --no-legend 2>/dev/null | grep -q '^mariadb\.service'; then
+        svc_list+=( "mariadb" )
+    fi
+    svc_list+=( "redis-server" "supervisor" )
+
+    for svc in "${svc_list[@]}"; do
+        if command -v systemctl >/dev/null 2>&1; then
+            if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                state="${CLR_GREEN}● active${CLR_RESET}"
+            elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+                state="${CLR_YELLOW}○ inactive${CLR_RESET}"
+            else
+                state="${CLR_DIM}· not installed${CLR_RESET}"
+            fi
+        else
+            state="${CLR_DIM}· unknown${CLR_RESET}"
+        fi
+        printf "    %-18s %b\n" "$svc" "$state"
+    done
+
+    # ── 2. Site URLs ──
+    printf "\n  %b网站地址 / Site URLs%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
+    local domain="${CDSI_DOMAIN:-}"
+    if [[ -z "$domain" && -f "${CDSI_ROOT}/config/domain" ]]; then
+        domain="$(cat "${CDSI_ROOT}/config/domain" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    fi
+    local site_url server_ip
+    if [[ -n "$domain" ]]; then
+        if [[ -d "/etc/letsencrypt/live/${domain}" ]]; then
+            site_url="https://${domain}"
+        else
+            site_url="http://${domain}"
+        fi
+    else
+        server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        if [[ -z "$server_ip" ]]; then
+            server_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || true)"
+        fi
+        site_url="http://${server_ip:-<server-ip>}"
+    fi
+    printf "    %b前台%b  %s\n" "${CLR_BOLD}" "${CLR_RESET}" "$site_url"
+    printf "    %b后台%b  %s/wp-admin/\n" "${CLR_BOLD}" "${CLR_RESET}" "$site_url"
+
+    # ── 3. Frontend reachability ──
+    printf "\n  %b前台访问检查 / Frontend Check%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
+    local http_code
+    http_code="$(curl -sL -o /dev/null -m 12 -w '%{http_code}' "$site_url" 2>/dev/null || echo '000')"
+    if [[ "$http_code" =~ ^[23][0-9][0-9]$ ]]; then
+        printf "    %b可访问 OK%b  (HTTP %s)\n" "${CLR_GREEN}" "${CLR_RESET}" "$http_code"
+    else
+        printf "    %b未能访问%b  (HTTP %s) — 请检查 Nginx / DNS / 防火墙\n" "${CLR_YELLOW}" "${CLR_RESET}" "$http_code"
+    fi
+
+    # ── 4. Credentials ──
+    printf "\n  %b登录凭据 / Credentials%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
+    local wp_pass="${CDSI_ROOT}/password/wordpress.pass"
+    if [[ -f "$wp_pass" ]]; then
+        local un pw
+        un="$(grep '^user:' "$wp_pass" 2>/dev/null | cut -d: -f2-)"
+        pw="$(grep '^pass:' "$wp_pass" 2>/dev/null | cut -d: -f2-)"
+        printf "    %bWordPress 后台登录 / WP Admin%b\n" "${CLR_BOLD}" "${CLR_RESET}"
+        printf "        登录名 User: %s\n" "${un:-cdsi}"
+        printf "        密  码 Pass: %s\n" "${pw:-<见 password/wordpress.pass>}"
+    else
+        printf "    %bWordPress 凭据文件未找到：%s%b\n" "${CLR_YELLOW}" "$wp_pass" "${CLR_RESET}"
+    fi
+    local mysql_pass="${CDSI_ROOT}/password/mysql.pass"
+    if [[ -f "$mysql_pass" ]]; then
+        local rootpw
+        rootpw="$(grep '^root:' "$mysql_pass" 2>/dev/null | cut -d: -f2-)"
+        printf "    %bMySQL 数据库 / Database%b\n" "${CLR_BOLD}" "${CLR_RESET}"
+        printf "        root 密码: %s\n" "${rootpw:-<见 password/mysql.pass>}"
+    fi
+
+    log_blank
+    log_info "以上凭据保存在 password/ 目录（mode 600），请勿提交到版本库。"
+    log_separator
+}
+
 # ── Top-level Menu ────────────────────────────────────────
 
 # Print the top-level menu shown after preflight checks pass.
@@ -231,7 +341,9 @@ cdsi_view_passwords() {
         [[ -f "$f" ]] || continue
         printf "\n  %b%s%b\n" "${CLR_CYAN}${CLR_BOLD}" "$(basename "$f")" "${CLR_RESET}"
         while IFS= read -r line; do
-            [[ -n "$line" ]] && printf "    %s\n" "$line"
+            if [[ -n "$line" ]]; then
+                printf "    %s\n" "$line"
+            fi
         done < "$f"
     done
     log_blank
@@ -294,7 +406,10 @@ cdsi_run_install_flow() {
             0)
                 log_info "Installing all components..."
                 cdsi_install_all
-                break
+                cdsi_summary
+                cdsi_post_install_report
+                log_success "全部服务安装完成，验收报告已输出。安装程序即将退出。"
+                exit 0
                 ;;
             [1-9])
                 # Validate against component count
