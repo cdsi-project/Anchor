@@ -136,13 +136,16 @@ fi
 # ── Point the Nginx server block at the domain ────────────
 # The CDSI WordPress site ships with a catch-all server_name (_;).
 # certbot --nginx matches a server block by server_name, so we set it
-# to the real domain first. Handles every sites-available catch-all.
+# to the real domain first. We deliberately skip the stock "default" site,
+# otherwise certbot would inject the TLS config there and create a duplicate
+# server_name (the WordPress <domain>.conf block would then be shadowed).
 _update_server_name() {
     local esc
     esc="$(printf '%s' "$PRIMARY_DOMAIN" | sed 's/[.[\*^$]/\\&/g')"
     local updated=0
     for f in /etc/nginx/sites-available/*; do
         [[ -f "$f" ]] || continue
+        [[ "$(basename "$f")" == "default" ]] && continue
         if grep -q "server_name _;" "$f"; then
             ${SUDO} sed -i "s/server_name _;/server_name ${esc};/" "$f"
             updated=1
