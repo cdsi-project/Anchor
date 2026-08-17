@@ -35,6 +35,7 @@ if [[ -t 1 ]]; then
     readonly CLR_CYAN=$'\033[36m'
     readonly CLR_BOLD=$'\033[1m'
     readonly CLR_DIM=$'\033[2m'
+    readonly CLR_BLINK=$'\033[5m'
 else
     readonly CLR_RESET=""
     readonly CLR_RED=""
@@ -43,6 +44,7 @@ else
     readonly CLR_CYAN=""
     readonly CLR_BOLD=""
     readonly CLR_DIM=""
+    readonly CLR_BLINK=""
 fi
 
 # ── Safe Command Wrappers ─────────────────────────────────

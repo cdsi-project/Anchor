@@ -112,7 +112,7 @@ cdsi_show_menu() {
     done
     printf "  %bq%b  Quit - 退出\n" "${CLR_BOLD}" "${CLR_RESET}"
     log_separator
-    printf "  Enter choice: "
+    printf "  %bEnter choice:%b " "${CLR_BLINK}" "${CLR_RESET}"
 }
 
 # Run a single component install by index.
@@ -211,7 +211,7 @@ cdsi_show_main_menu() {
     printf "  %b3%b  查看密码 - View passwords\n" "${CLR_BOLD}" "${CLR_RESET}"
     printf "  %bq%b  退出     - Quit\n" "${CLR_BOLD}" "${CLR_RESET}"
     log_separator
-    printf "  Enter choice: "
+    printf "  %bEnter choice:%b " "${CLR_BLINK}" "${CLR_RESET}"
 }
 
 # Display all stored component credentials (password/*.pass, mode 600).
@@ -374,7 +374,7 @@ main() {
     stty erase '^H' 2>/dev/null || true
 
     # ── Press any key to continue (after preflight) ──
-    printf "  %bPreflight 检查完成，按任意键继续...%b" "${CLR_BOLD}" "${CLR_RESET}"
+    printf "  %bPreflight 检查完成，按任意键继续...%b" "${CLR_BLINK}" "${CLR_RESET}"
     local _anykey=""
     if read -r -n1 -s _anykey; then
         echo
@@ -414,7 +414,7 @@ main() {
                 cdsi_view_passwords
                 # Keep the credentials on screen until the user dismisses them,
                 # otherwise the next menu render would clear them instantly.
-                printf "  %b按任意键返回主菜单...%b" "${CLR_BOLD}" "${CLR_RESET}"
+                printf "  %b按任意键返回主菜单...%b" "${CLR_BLINK}" "${CLR_RESET}"
                 local _back=""
                 if read -r -n1 -s _back 2>/dev/null; then
                     echo
