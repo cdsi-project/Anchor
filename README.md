@@ -310,7 +310,8 @@ Scripts that belong to a later milestone keep their current placeholder behavior
 
 The PHP installer uses the default PHP packages from the supported Ubuntu
 repositories. It does not add a third-party PHP PPA or replace an existing
-global PHP alternative.
+global PHP alternative. Redis, GD, and OPcache are required extensions;
+Imagick is installed when an Ubuntu package is available.
 
 ---
 

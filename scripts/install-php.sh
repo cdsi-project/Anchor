@@ -15,6 +15,68 @@ fail() {
     exit 1
 }
 
+php_extension_loaded() {
+    local extension="$1"
+    PHP_EXTENSION_NAME="$extension" "${PHP_BIN}" \
+        -r 'exit(extension_loaded(getenv("PHP_EXTENSION_NAME")) ? 0 : 1);'
+}
+
+package_candidate_available() {
+    local package="$1"
+    local candidate=""
+    candidate="$(LC_ALL=C apt-cache policy "$package" 2>/dev/null | \
+        awk '/Candidate:/{print $2; exit}' || true)"
+    [[ -n "$candidate" && "$candidate" != "(none)" ]]
+}
+
+install_php_extension() {
+    local extension="$1"
+    local required="$2"
+    shift 2
+
+    if php_extension_loaded "$extension"; then
+        log "PHP extension ${extension} is already loaded."
+        return 0
+    fi
+
+    local package=""
+    local candidate
+    for candidate in "$@"; do
+        if package_candidate_available "$candidate"; then
+            package="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$package" ]]; then
+        if [[ "$required" == true ]]; then
+            fail "No Ubuntu package candidate is available for required PHP extension ${extension}: $*"
+        fi
+        warn "Optional PHP extension ${extension} is unavailable from the Ubuntu repositories."
+        return 0
+    fi
+
+    log "Installing ${package} for PHP extension ${extension}..."
+    if ! "${ROOT_CMD[@]}" env DEBIAN_FRONTEND=noninteractive \
+        apt-get install -y "$package"; then
+        if [[ "$required" == true ]]; then
+            fail "Could not install required PHP extension ${extension} from ${package}."
+        fi
+        warn "Could not install optional PHP extension ${extension} from ${package}."
+        return 0
+    fi
+
+    if ! php_extension_loaded "$extension"; then
+        if [[ "$required" == true ]]; then
+            fail "Required PHP extension ${extension} is not loaded after installing ${package}."
+        fi
+        warn "Optional PHP extension ${extension} is not loaded after installing ${package}."
+        return 0
+    fi
+
+    log "PHP extension ${extension} is loaded."
+}
+
 if [[ "${EUID}" -eq 0 ]]; then
     ROOT_CMD=()
 elif command -v sudo >/dev/null 2>&1; then
@@ -73,7 +135,6 @@ PHP_PACKAGES=(
     php-bcmath
     php-intl
     php-mysql
-    php-gd
 )
 
 log "Updating Ubuntu package metadata..."
@@ -105,23 +166,14 @@ PHP_BIN="/usr/bin/php${PHP_VERSION}"
 
 [[ -x "${PHP_BIN}" ]] || fail "PHP ${PHP_VERSION} binary was not installed."
 
-if ! "${PHP_BIN}" -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'; then
-    OPCACHE_PACKAGE="php${PHP_VERSION}-opcache"
-    log "Installing ${OPCACHE_PACKAGE}..."
-
-    if ! apt-cache show "$OPCACHE_PACKAGE" >/dev/null 2>&1; then
-        fail "Zend OPcache is not loaded and ${OPCACHE_PACKAGE} is unavailable from the Ubuntu repositories."
-    fi
-
-    if ! "${ROOT_CMD[@]}" env DEBIAN_FRONTEND=noninteractive \
-        apt-get install -y "$OPCACHE_PACKAGE"; then
-        fail "Could not install ${OPCACHE_PACKAGE}."
-    fi
-fi
-
-if ! "${PHP_BIN}" -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'; then
-    fail "Zend OPcache is not loaded for PHP ${PHP_VERSION}."
-fi
+install_php_extension "Zend OPcache" true \
+    php-opcache "php${PHP_VERSION}-opcache"
+install_php_extension redis true \
+    php-redis "php${PHP_VERSION}-redis"
+install_php_extension gd true \
+    php-gd "php${PHP_VERSION}-gd"
+install_php_extension imagick false \
+    php-imagick "php${PHP_VERSION}-imagick"
 
 FPM_SERVICE="php${PHP_VERSION}-fpm"
 

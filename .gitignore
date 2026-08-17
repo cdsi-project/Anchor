@@ -13,6 +13,13 @@ storage/
 vendor/
 node_modules/
 
+# === Generated passwords (never commit) ===
+password/*.pass
+
+# === Deployment-specific values (never commit) ===
+# Domain entered at install.sh entry is deployment-specific.
+config/domain
+
 # === OS / editor noise ===
 .DS_Store
 Thumbs.db

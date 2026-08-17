@@ -35,13 +35,15 @@ readonly CDSI_PREFLIGHT_SCRIPT="${CDSI_ROOT}/scripts/check-env.sh"
 
 # ── Component Registry ─────────────────────────────────────
 # Parallel arrays: names, descriptions, script paths, done flags.
-CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Redis")
-CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "Redis数据库")
+CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Redis" "Supervisor" "Certbot")
+CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "Redis数据库" "进程守护" "SSL证书")
 CDSI_COMP_SCRIPTS=(
     "${CDSI_ROOT}/scripts/install-nginx.sh"
     "${CDSI_ROOT}/scripts/install-mysql.sh"
     "${CDSI_ROOT}/scripts/install-php.sh"
     "${CDSI_ROOT}/scripts/install-redis.sh"
+    "${CDSI_ROOT}/scripts/install-supervisor.sh"
+    "${CDSI_ROOT}/scripts/install-certbot.sh"
 )
 CDSI_COMP_DONE=()
 CDSI_COMP_UNAVAILABLE=()
@@ -244,6 +246,40 @@ main() {
         log_info  "Log: ${CDSI_LOG_FILE}"
         exit 1
     fi
+
+    # Normalize the terminal erase character so the Backspace key works in the
+    # menu. Some terminals send ^H (BS) while the remote `stty erase` defaults
+    # to ^? (DEL), which makes Backspace echo garbage instead of deleting.
+    # This matches Backspace → ^H. Switch to '^?' if your terminal sends DEL.
+    stty erase '^H' 2>/dev/null || true
+
+    # ── Domain prompt (optional) ───────────────────────────
+    # Drives the WordPress site URL and the Certbot TLS certificate.
+    # Saved to config/domain so standalone component runs also pick it up.
+    CDSI_DOMAIN_FILE="${CDSI_ROOT}/config/domain"
+    if [[ -z "${CDSI_DOMAIN:-}" ]] && [[ -f "$CDSI_DOMAIN_FILE" ]]; then
+        CDSI_DOMAIN="$(cat "$CDSI_DOMAIN_FILE" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    fi
+    printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BOLD}" "${CLR_RESET}"
+    if ! read -r _domain_input; then
+        _domain_input=""
+    fi
+    if [[ -n "$_domain_input" ]]; then
+        CDSI_DOMAIN="$(printf '%s' "$_domain_input" | tr -d '[:space:]')"
+        mkdir -p "${CDSI_ROOT}/config"
+        printf '%s\n' "$CDSI_DOMAIN" > "$CDSI_DOMAIN_FILE"
+        log_info "Domain set: ${CDSI_DOMAIN} (saved to config/domain)"
+        # Cert admin email is required for the TLS certificate (renewal notices).
+        printf "  %b证书邮箱%b (Cert admin email, for renewal notices): " "${CLR_BOLD}" "${CLR_RESET}"
+        if ! read -r _email_input; then
+            _email_input=""
+        fi
+        if [[ -n "$_email_input" ]]; then
+            CDSI_CERT_EMAIL="$(printf '%s' "$_email_input" | tr -d '[:space:]')"
+            log_info "Cert admin email set: ${CDSI_CERT_EMAIL}"
+        fi
+    fi
+    export CDSI_DOMAIN CDSI_CERT_EMAIL
 
     while true; do
         cdsi_show_menu
