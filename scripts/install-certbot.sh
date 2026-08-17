@@ -215,7 +215,7 @@ if [[ "$CERTBOT_RC" -ne 0 ]]; then
     #    identifiers in the last 168h0m0s, retry after 2026-08-18 20:52:38 UTC"
     # In that case the site stays HTTP-only; user re-runs certbot after cooldown.
     if grep -qiE "too many certificates|rate.?limit|retry after" "$CERTBOT_LOG"; then
-        _retry="$(grep -oiE 'retry after [^:,]*' "$CERTBOT_LOG" | head -1 || true)"
+        _retry="$(grep -oiE 'retry after [0-9: -]+UTC' "$CERTBOT_LOG" | head -1 || true)"
         log_fail "Let's Encrypt rate limit reached — certificate NOT issued."
         [[ -n "$_retry" ]] && log_fail "  ${_retry}"
         log_fail "  The site stays HTTP-only for now. After the cooldown, re-run:"
