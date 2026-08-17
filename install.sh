@@ -195,6 +195,122 @@ cdsi_summary() {
     log_info "Log: ${CDSI_LOG_FILE}"
 }
 
+# ── Top-level Menu ────────────────────────────────────────
+
+# Print the top-level menu shown after preflight checks pass.
+cdsi_show_main_menu() {
+    log_blank
+    log_separator
+    printf "  %bCDSI 主菜单 / Main Menu%b\n" "${CLR_BOLD}" "${CLR_RESET}"
+    log_separator
+    log_blank
+    printf "  %b1%b  安装服务 - Install services\n" "${CLR_BOLD}" "${CLR_RESET}"
+    printf "  %b2%b  卸载服务 - Uninstall services\n" "${CLR_BOLD}" "${CLR_RESET}"
+    printf "  %b3%b  查看密码 - View passwords\n" "${CLR_BOLD}" "${CLR_RESET}"
+    printf "  %bq%b  退出     - Quit\n" "${CLR_BOLD}" "${CLR_RESET}"
+    log_separator
+    printf "  Enter choice: "
+}
+
+# Display all stored component credentials (password/*.pass, mode 600).
+cdsi_view_passwords() {
+    local pass_dir="${CDSI_ROOT}/password"
+    log_blank
+    log_separator
+    printf "  %b查看密码 / View Passwords%b\n" "${CLR_BOLD}" "${CLR_RESET}"
+    log_separator
+    if [[ ! -d "$pass_dir" ]] || [[ -z "$(ls -A "$pass_dir" 2>/dev/null)" ]]; then
+        log_info "No password files found at ${pass_dir}."
+        log_info "Install components first to generate credentials."
+        return 0
+    fi
+    local f
+    for f in "${pass_dir}"/*.pass; do
+        [[ -f "$f" ]] || continue
+        printf "\n  %b%s%b\n" "${CLR_CYAN}${CLR_BOLD}" "$(basename "$f")" "${CLR_RESET}"
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && printf "    %s\n" "$line"
+        done < "$f"
+    done
+    log_blank
+    log_info "These files are mode 600 — keep them secure and never commit them."
+}
+
+# Domain prompt + interactive install menu (top-level option 1).
+cdsi_run_install_flow() {
+    CDSI_CURRENT_STAGE="MENU"
+
+    # Domain prompt (optional) — drives the WordPress URL and the Certbot cert.
+    # Saved to config/domain so standalone component runs also pick it up.
+    local CDSI_DOMAIN_FILE="${CDSI_ROOT}/config/domain"
+    if [[ -z "${CDSI_DOMAIN:-}" ]] && [[ -f "$CDSI_DOMAIN_FILE" ]]; then
+        CDSI_DOMAIN="$(cat "$CDSI_DOMAIN_FILE" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    fi
+
+    if [[ -n "${CDSI_DOMAIN:-}" ]]; then
+        log_info "Using existing domain: ${CDSI_DOMAIN}"
+    else
+        printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BOLD}" "${CLR_RESET}"
+        local _domain_input=""
+        if ! read -r _domain_input; then
+            _domain_input=""
+        fi
+        if [[ -n "$_domain_input" ]]; then
+            CDSI_DOMAIN="$(printf '%s' "$_domain_input" | tr -d '[:space:]')"
+            mkdir -p "${CDSI_ROOT}/config"
+            printf '%s\n' "$CDSI_DOMAIN" > "$CDSI_DOMAIN_FILE"
+            log_info "Domain set: ${CDSI_DOMAIN} (saved to config/domain)"
+            # Cert admin email is required for the TLS certificate (renewal notices).
+            printf "  %b证书邮箱%b (Cert admin email, for renewal notices): " "${CLR_BOLD}" "${CLR_RESET}"
+            local _email_input=""
+            if ! read -r _email_input; then
+                _email_input=""
+            fi
+            if [[ -n "$_email_input" ]]; then
+                CDSI_CERT_EMAIL="$(printf '%s' "$_email_input" | tr -d '[:space:]')"
+                log_info "Cert admin email set: ${CDSI_CERT_EMAIL}"
+            fi
+        fi
+    fi
+    export CDSI_DOMAIN CDSI_CERT_EMAIL
+
+    while true; do
+        cdsi_show_menu
+
+        local choice=""
+        if ! read -r choice; then
+            log_blank
+            log_info "Input closed. Returning to main menu."
+            break
+        fi
+
+        case "$choice" in
+            0)
+                log_info "Installing all components..."
+                cdsi_install_all
+                break
+                ;;
+            [1-9])
+                # Validate against component count
+                if [[ "$choice" -le "${#CDSI_COMP_NAMES[@]}" ]]; then
+                    local idx=$((choice - 1))
+                    cdsi_install_component "$idx"
+                else
+                    log_warning "Invalid choice: $choice"
+                fi
+                ;;
+            [qQ])
+                break
+                ;;
+            *)
+                log_warning "Invalid choice: '$choice'"
+                ;;
+        esac
+    done
+
+    cdsi_summary
+}
+
 # ── Main ───────────────────────────────────────────────────
 main() {
     # ── Initialize ──
@@ -237,12 +353,9 @@ main() {
             ;;
     esac
 
-    # ── Interactive Install Menu ──
-    CDSI_CURRENT_STAGE="MENU"
-
-    # Require an interactive terminal for the selection menu.
+    # ── Interactive gate ──
     if [[ ! -t 0 ]]; then
-        log_error "Interactive terminal required for component selection."
+        log_error "Interactive terminal required for the installer menu."
         log_info  "If running via SSH, use:  ssh -t user@host 'cd /path && ./install.sh'"
         log_info  "Log: ${CDSI_LOG_FILE}"
         exit 1
@@ -254,58 +367,41 @@ main() {
     # This matches Backspace → ^H. Switch to '^?' if your terminal sends DEL.
     stty erase '^H' 2>/dev/null || true
 
-    # ── Domain prompt (optional) ───────────────────────────
-    # Drives the WordPress site URL and the Certbot TLS certificate.
-    # Saved to config/domain so standalone component runs also pick it up.
-    CDSI_DOMAIN_FILE="${CDSI_ROOT}/config/domain"
-    if [[ -z "${CDSI_DOMAIN:-}" ]] && [[ -f "$CDSI_DOMAIN_FILE" ]]; then
-        CDSI_DOMAIN="$(cat "$CDSI_DOMAIN_FILE" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    # ── Press any key to continue (after preflight) ──
+    printf "  %bPreflight 检查完成，按任意键继续...%b" "${CLR_BOLD}" "${CLR_RESET}"
+    local _anykey=""
+    if read -r -n1 -s _anykey; then
+        echo
     fi
-    printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BOLD}" "${CLR_RESET}"
-    if ! read -r _domain_input; then
-        _domain_input=""
-    fi
-    if [[ -n "$_domain_input" ]]; then
-        CDSI_DOMAIN="$(printf '%s' "$_domain_input" | tr -d '[:space:]')"
-        mkdir -p "${CDSI_ROOT}/config"
-        printf '%s\n' "$CDSI_DOMAIN" > "$CDSI_DOMAIN_FILE"
-        log_info "Domain set: ${CDSI_DOMAIN} (saved to config/domain)"
-        # Cert admin email is required for the TLS certificate (renewal notices).
-        printf "  %b证书邮箱%b (Cert admin email, for renewal notices): " "${CLR_BOLD}" "${CLR_RESET}"
-        if ! read -r _email_input; then
-            _email_input=""
-        fi
-        if [[ -n "$_email_input" ]]; then
-            CDSI_CERT_EMAIL="$(printf '%s' "$_email_input" | tr -d '[:space:]')"
-            log_info "Cert admin email set: ${CDSI_CERT_EMAIL}"
-        fi
-    fi
-    export CDSI_DOMAIN CDSI_CERT_EMAIL
+    unset _anykey
 
+    # ── Top-level menu loop ──
+    CDSI_CURRENT_STAGE="MENU"
     while true; do
-        cdsi_show_menu
+        cdsi_show_main_menu
 
         local choice=""
         if ! read -r choice; then
             log_blank
-            log_info "Input closed. Exiting installer menu."
+            log_info "Input closed. Exiting installer."
             break
         fi
 
         case "$choice" in
-            0)
-                log_info "Installing all components..."
-                cdsi_install_all
-                break
+            1)
+                cdsi_run_install_flow
                 ;;
-            [1-9])
-                # Validate against component count
-                if [[ "$choice" -le "${#CDSI_COMP_NAMES[@]}" ]]; then
-                    local idx=$((choice - 1))
-                    cdsi_install_component "$idx"
+            2)
+                CDSI_CURRENT_STAGE="UNINSTALL"
+                if [[ -f "${CDSI_ROOT}/uninstall.sh" ]]; then
+                    bash "${CDSI_ROOT}/uninstall.sh"
                 else
-                    log_warning "Invalid choice: $choice"
+                    log_error "uninstall.sh not found at ${CDSI_ROOT}/uninstall.sh"
                 fi
+                CDSI_CURRENT_STAGE="MENU"
+                ;;
+            3)
+                cdsi_view_passwords
                 ;;
             [qQ])
                 break
@@ -316,8 +412,6 @@ main() {
         esac
     done
 
-    # ── Summary ──
-    cdsi_summary
     log_blank
     log_success "CDSI Installer finished."
 }
