@@ -286,6 +286,10 @@ cdsi_run_install_flow() {
             break
         fi
 
+        # Select → clear → output: wipe the menu, then run the chosen action
+        # so its output starts on a clean screen.
+        clear 2>/dev/null || printf '\033[2J\033[H'
+
         case "$choice" in
             0)
                 log_info "Installing all components..."
@@ -388,6 +392,10 @@ main() {
             log_info "Input closed. Exiting installer."
             break
         fi
+
+        # Select → clear → output: wipe the menu, then run the chosen action
+        # so its output starts on a clean screen.
+        clear 2>/dev/null || printf '\033[2J\033[H'
 
         case "$choice" in
             1)
