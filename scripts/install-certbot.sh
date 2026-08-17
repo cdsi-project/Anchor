@@ -98,7 +98,7 @@ if [[ -n "${CDSI_DOMAIN:-}" ]]; then
         [[ -n "$_d" ]] && DOMAINS+=("$_d")
     done
 elif [[ -t 0 ]]; then
-    printf "\033[1;34m[CDSI]\033[0m Enter domain for the TLS certificate (e.g. cdsi.example.com, comma-separated for several): "
+    printf "\033[1;34m[CDSI]\033[0m \033[5mEnter domain for the TLS certificate (e.g. cdsi.example.com, comma-separated for several):\033[0m "
     read -r _input
     # shellcheck disable=SC2206
     IFS=', ' read -r -a _raw <<< "${_input:-}"
@@ -132,14 +132,14 @@ if [[ "$CERT_ALREADY_ISSUED" == true ]]; then
     log_ok "Live cert for ${PRIMARY_DOMAIN} present — reusing it (no email prompt)."
 else
     if [[ -z "$EMAIL" ]] && [[ -t 0 ]]; then
-        printf "\033[1;34m[CDSI]\033[0m Enter admin email for certificate renewal notices: "
+        printf "\033[1;34m[CDSI]\033[0m \033[5mEnter admin email for certificate renewal notices:\033[0m "
         read -r _email_input
         EMAIL="$(printf '%s' "${_email_input:-}" | tr -d '[:space:]')"
     fi
     [[ -n "$EMAIL" ]] || fail "A valid admin email is required to obtain a TLS certificate. Set CDSI_CERT_EMAIL=you@example.com and re-run."
 fi
 if [[ -z "$EMAIL" ]] && [[ -t 0 ]]; then
-    printf "\033[1;34m[CDSI]\033[0m Enter admin email for certificate renewal notices: "
+    printf "\033[1;34m[CDSI]\033[0m \033[5mEnter admin email for certificate renewal notices:\033[0m "
     read -r _email_input
     EMAIL="$(printf '%s' "${_email_input:-}" | tr -d '[:space:]')"
 fi

@@ -368,7 +368,7 @@ cdsi_run_install_flow() {
     if [[ -n "${CDSI_DOMAIN:-}" ]]; then
         log_info "Using existing domain: ${CDSI_DOMAIN}"
     else
-        printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BOLD}" "${CLR_RESET}"
+        printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BLINK}" "${CLR_RESET}"
         local _domain_input=""
         if ! read -r _domain_input; then
             _domain_input=""
@@ -379,7 +379,7 @@ cdsi_run_install_flow() {
             printf '%s\n' "$CDSI_DOMAIN" > "$CDSI_DOMAIN_FILE"
             log_info "Domain set: ${CDSI_DOMAIN} (saved to config/domain)"
             # Cert admin email is required for the TLS certificate (renewal notices).
-            printf "  %b证书邮箱%b (Cert admin email, for renewal notices): " "${CLR_BOLD}" "${CLR_RESET}"
+            printf "  %b证书邮箱%b (Cert admin email, for renewal notices): " "${CLR_BLINK}" "${CLR_RESET}"
             local _email_input=""
             if ! read -r _email_input; then
                 _email_input=""
