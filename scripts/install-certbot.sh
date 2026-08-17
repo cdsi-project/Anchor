@@ -119,6 +119,20 @@ fi
 PRIMARY_DOMAIN="${DOMAINS[0]}"
 log "Target domain(s): ${DOMAINS[*]}"
 
+# ── Idempotent skip: already configured for this domain ──
+# If certbot is present AND a live certificate for the primary domain
+# already exists, the whole issuance flow (including the interactive email
+# prompt and the Nginx server_name re-point) is skipped. This avoids hanging
+# on the email prompt during re-runs / "install all" when TLS is already up.
+if command -v certbot >/dev/null 2>&1 && [[ -n "${PRIMARY_DOMAIN:-}" ]]; then
+    if [[ -d "/etc/letsencrypt/live/${PRIMARY_DOMAIN}" ]]; then
+        log_ok "Certbot already configured for ${PRIMARY_DOMAIN} (live cert present) — skipping issuance."
+        log "  Re-run 'certbot renew' for renewal, or delete the cert to re-issue:"
+        log "  sudo certbot delete --cert-name ${PRIMARY_DOMAIN}"
+        exit 0
+    fi
+fi
+
 # ── Resolve admin email (required for the ACME account) ───
 EMAIL="${CDSI_CERT_EMAIL:-}"
 if [[ -z "$EMAIL" ]] && [[ -t 0 ]]; then

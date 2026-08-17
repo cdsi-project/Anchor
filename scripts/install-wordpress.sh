@@ -322,7 +322,10 @@ maybe_issue_cert() {
     local cert_script="${CDSI_ROOT}/scripts/install-certbot.sh"
     [[ -f "$cert_script" ]] || return 0
     log "Requesting TLS certificate for ${WP_DOMAIN} via Certbot..."
-    if bash "$cert_script"; then
+    # Pass the domain + admin email through so a re-run does not hang on the
+    # interactive email prompt (install-certbot.sh also self-skips if a live
+    # cert for this domain already exists).
+    if CDSI_DOMAIN="${WP_DOMAIN}" CDSI_CERT_EMAIL="${CDSI_CERT_EMAIL:-}" bash "$cert_script"; then
         log_ok "Certbot configuration complete for ${WP_DOMAIN}."
     else
         log_fail "Certbot failed to obtain a certificate for ${WP_DOMAIN}."
