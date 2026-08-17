@@ -85,6 +85,7 @@ cdsi_banner() {
 
 # Print the interactive component-selection menu.
 cdsi_show_menu() {
+    clear 2>/dev/null || printf '\033[2J\033[H'
     log_blank
     log_separator
     printf "  %bCDSI Component Installation%b\n" "${CLR_BOLD}" "${CLR_RESET}"
@@ -199,6 +200,7 @@ cdsi_summary() {
 
 # Print the top-level menu shown after preflight checks pass.
 cdsi_show_main_menu() {
+    clear 2>/dev/null || printf '\033[2J\033[H'
     log_blank
     log_separator
     printf "  %bCDSI 主菜单 / Main Menu%b\n" "${CLR_BOLD}" "${CLR_RESET}"
