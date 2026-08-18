@@ -255,7 +255,7 @@ install_core() {
 # 5) Nginx server block → php-fpm
 # ══════════════════════════════════════════════════════════
 configure_nginx() {
-    local phpver sock site_name conf_path enabled_path conf
+    local phpver sock site_name conf_path enabled_path tmpl_file
     phpver="$(detect_php_fpm)"
     sock="/run/php/php${phpver}-fpm.sock"
 
@@ -272,58 +272,18 @@ configure_nginx() {
 
     log "Configuring Nginx server block (${site_name}.conf) → ${WP_DIR} (php-fpm ${phpver})..."
 
-    conf="$(cat <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${WP_DOMAIN:-_};
-
-    root ${WP_DIR};
-    index index.php index.html index.htm;
-
-    # Allow large uploads (WordPress media, theme/plugin uploads)
-    client_max_body_size 64M;
-
-    # Security headers (inherited by all locations unless they add their own)
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    access_log /var/log/nginx/wordpress.access.log;
-    error_log  /var/log/nginx/wordpress.error.log;
-
-    location / {
-        try_files \$uri \$uri/ /index.php?\$args;
-    }
-
-    # Static asset caching (no add_header here so server-level headers inherit)
-    location ~* \\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|otf)\$ {
-        expires 30d;
-        access_log off;
-    }
-
-    location ~ \\.php\$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:${sock};
-        fastcgi_buffers 16 16k;
-        fastcgi_buffer_size 32k;
-        fastcgi_read_timeout 300;
-    }
-
-    # Deny access to sensitive dotfiles
-    location ~ /\\.(ht|git|env|svn|hg) {
-        deny all;
-    }
-
-    # Deny PHP execution in uploads (prevent malicious script execution)
-    location ~* /(?:uploads|files)/.*\\.php\$ {
-        deny all;
-    }
-}
-EOF
-)"
-    printf '%s\n' "$conf" | ${SUDO} tee "$conf_path" >/dev/null
+    # Use the site template from config/ — variables substituted at install
+    # time. Template uses {{WP_DOMAIN}}/{{WP_DIR}}/{{PHP_SOCK}} placeholders
+    # (not $VAR, to avoid clashing with nginx's own $uri/$args variables).
+    tmpl_file="${CDSI_ROOT}/config/nginx-site.conf.template"
+    if [[ ! -f "$tmpl_file" ]]; then
+        fail "Nginx site template not found: ${tmpl_file}"
+    fi
+    log "  Using site template: ${tmpl_file}"
+    sed -e "s|{{WP_DOMAIN}}|${WP_DOMAIN:-_}|g" \
+        -e "s|{{WP_DIR}}|${WP_DIR}|g" \
+        -e "s|{{PHP_SOCK}}|${sock}|g" \
+        "$tmpl_file" | ${SUDO} tee "$conf_path" >/dev/null
     ${SUDO} ln -sf "$conf_path" "$enabled_path"
 
     # Disable the stock 'default' site once our domain block is enabled. The
