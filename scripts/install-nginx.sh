@@ -68,13 +68,21 @@ done
 _apply_tuning() {
     local tuning_file="/etc/nginx/conf.d/cdsi-tuning.conf"
     [[ -d /etc/nginx/conf.d ]] || return 0
-    log "Applying CDSI global Nginx tuning (${tuning_file})..."
+    log "Applying CDSI global Nginx tuning..."
+
+    # server_tokens must be patched in nginx.conf directly — putting it in
+    # conf.d would duplicate the directive already in the http block.
+    if grep -q 'server_tokens build;' /etc/nginx/nginx.conf; then
+        "${ROOT_CMD[@]}" sed -i 's/server_tokens build;/server_tokens off;/' /etc/nginx/nginx.conf
+        log "  server_tokens: build → off (patched nginx.conf)"
+    elif ! grep -q 'server_tokens off;' /etc/nginx/nginx.conf; then
+        "${ROOT_CMD[@]}" sed -i '/^http {/a\\tserver_tokens off;' /etc/nginx/nginx.conf
+        log "  server_tokens off added to nginx.conf"
+    fi
     cat > /tmp/cdsi-tuning.$$ <<'TUNING'
 # CDSI Nginx global tuning — http block level.
 # Managed by install-nginx.sh; re-running the installer overwrites this file.
-
-# Hide nginx version in responses and error pages.
-server_tokens off;
+# (server_tokens is patched in nginx.conf directly to avoid duplication.)
 
 # ── Gzip compression ──
 gzip_vary on;
