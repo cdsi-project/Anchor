@@ -121,7 +121,7 @@ sudo ./install.sh
 - 安装 Certbot 组件（第 6 项）时，自动通过 Let's Encrypt ACME HTTP-01 验证签发免费 SSL 证书。
 - **前提**：域名 DNS A 记录已指向服务器 IP，且 80 端口对公网可达。
 - 签发后自动配置 Nginx 80→443 重定向，并启用 `certbot.timer` 自动续期。
-- 证书邮箱默认 `admin@cdsi.local`（占位），想收续期通知可覆盖：
+- 证书邮箱默认 `admin@<域名>`（如 `admin@cdsi.example.com`），想用其他邮箱可覆盖：
 
 ```bash
 sudo CDSI_CERT_EMAIL=you@example.com ./install.sh
@@ -244,7 +244,7 @@ sudo ./install.sh   # 选 1 → 选 7（WordPress）
 
 ### Q: 安装卡在 "Enter admin email" 不动？
 
-已修复——邮箱默认 `admin@cdsi.local`，不再交互提示。如果看到此提示说明代码版本较旧，`git pull` 更新。
+已修复——邮箱默认 `admin@<域名>`，不再交互提示。如果看到此提示说明代码版本较旧，`git pull` 更新。
 
 ### Q: `nginx -t` 报 `conflicting server name`？
 

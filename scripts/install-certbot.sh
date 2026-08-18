@@ -13,7 +13,7 @@
 #                             CDSI_DOMAIN="example.com,www.example.com")
 #   • interactive prompt     when run inside install.sh / a TTY
 #   • admin email:           CDSI_CERT_EMAIL="you@example.com"
-#                            (defaults to admin@cdsi.local if omitted)
+#                            (defaults to admin@<domain> if omitted)
 #
 # Idempotent:
 #   • Certbot package: skips if already installed.
@@ -121,11 +121,10 @@ log "Target domain(s): ${DOMAINS[*]}"
 
 # ── Resolve admin email (required for the ACME account) ───
 # When a live cert for this domain already exists, certbot reuses it and does
-# NOT require an email prompt — we fall back to a placeholder so the re-apply
 # ── Resolve admin email (required for the ACME account) ───
-# Default to admin@cdsi.local so the script never blocks on an interactive
+# Default to admin@<domain> so the script never blocks on an interactive
 # prompt during re-runs / non-TTY installs. Override with CDSI_CERT_EMAIL.
-EMAIL="${CDSI_CERT_EMAIL:-admin@cdsi.local}"
+EMAIL="${CDSI_CERT_EMAIL:-admin@${PRIMARY_DOMAIN}}"
 if [[ -d "/etc/letsencrypt/live/${PRIMARY_DOMAIN}" ]]; then
     log_ok "Live cert for ${PRIMARY_DOMAIN} present — reusing it (no new issuance)."
 else

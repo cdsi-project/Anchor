@@ -380,10 +380,10 @@ cdsi_run_install_flow() {
             log_info "Domain set: ${CDSI_DOMAIN} (saved to config/domain)"
         fi
     fi
-    # Cert email: defaults to admin@cdsi.local (used by certbot for the ACME
+    # Cert email: defaults to admin@<domain> (used by certbot for the ACME
     # account). Override with CDSI_CERT_EMAIL=you@example.com if needed.
-    if [[ -z "${CDSI_CERT_EMAIL:-}" ]]; then
-        CDSI_CERT_EMAIL="admin@cdsi.local"
+    if [[ -z "${CDSI_CERT_EMAIL:-}" ]] && [[ -n "${CDSI_DOMAIN:-}" ]]; then
+        CDSI_CERT_EMAIL="admin@${CDSI_DOMAIN}"
     fi
     export CDSI_DOMAIN CDSI_CERT_EMAIL
 
