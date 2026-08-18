@@ -281,6 +281,15 @@ server {
     root ${WP_DIR};
     index index.php index.html index.htm;
 
+    # Allow large uploads (WordPress media, theme/plugin uploads)
+    client_max_body_size 64M;
+
+    # Security headers (inherited by all locations unless they add their own)
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
     access_log /var/log/nginx/wordpress.access.log;
     error_log  /var/log/nginx/wordpress.error.log;
 
@@ -288,12 +297,27 @@ server {
         try_files \$uri \$uri/ /index.php?\$args;
     }
 
+    # Static asset caching (no add_header here so server-level headers inherit)
+    location ~* \\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|otf)\$ {
+        expires 30d;
+        access_log off;
+    }
+
     location ~ \\.php\$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:${sock};
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+        fastcgi_read_timeout 300;
     }
 
-    location ~ /\\.(ht|git|env) {
+    # Deny access to sensitive dotfiles
+    location ~ /\\.(ht|git|env|svn|hg) {
+        deny all;
+    }
+
+    # Deny PHP execution in uploads (prevent malicious script execution)
+    location ~* /(?:uploads|files)/.*\\.php\$ {
         deny all;
     }
 }

@@ -61,11 +61,67 @@ for source_file in \
     fi
 done
 
+# ── Apply CDSI global Nginx tuning (conf.d/cdsi-tuning.conf) ──
+# Idempotent: writes the tuning file and reloads nginx if running.
+# Called both on fresh install and on idempotent skip so the tuning stays
+# in sync with the installer's version.
+_apply_tuning() {
+    local tuning_file="/etc/nginx/conf.d/cdsi-tuning.conf"
+    [[ -d /etc/nginx/conf.d ]] || return 0
+    log "Applying CDSI global Nginx tuning (${tuning_file})..."
+    cat > /tmp/cdsi-tuning.$$ <<'TUNING'
+# CDSI Nginx global tuning — http block level.
+# Managed by install-nginx.sh; re-running the installer overwrites this file.
+
+# Hide nginx version in responses and error pages.
+server_tokens off;
+
+# ── Gzip compression ──
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 6;
+gzip_min_length 256;
+gzip_types
+    text/plain
+    text/css
+    text/xml
+    text/javascript
+    application/javascript
+    application/x-javascript
+    application/json
+    application/xml
+    application/xml+rss
+    application/rss+xml
+    application/atom+xml
+    image/svg+xml;
+
+# ── SSL session cache (used by certbot-managed 443 blocks) ──
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 10m;
+ssl_prefer_server_ciphers on;
+
+# ── Keepalive ──
+keepalive_timeout 65;
+TUNING
+    "${ROOT_CMD[@]}" cp /tmp/cdsi-tuning.$$ "$tuning_file"
+    rm -f /tmp/cdsi-tuning.$$
+    # Reload only if nginx is running and the config validates.
+    if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
+        if "${ROOT_CMD[@]}" nginx -t >/dev/null 2>&1; then
+            "${ROOT_CMD[@]}" systemctl reload nginx 2>/dev/null || true
+            log "Global tuning applied: server_tokens off, gzip types, SSL session cache."
+        else
+            log "WARNING: nginx -t failed after tuning; leaving config as-is."
+        fi
+    fi
+}
+
 # ── Idempotency: skip if already installed, configured, and running ──
 # Re-running the installer should not re-validate and re-enable Nginx when
 # nothing needs to change. We only skip when the service is healthy.
 if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then
     if "${ROOT_CMD[@]}" nginx -t >/dev/null 2>&1; then
+        _apply_tuning
         log "Nginx is already installed, its configuration is valid, and the service is running."
         log "Skipping installation."
         nginx -v 2>&1 | sed 's/^/  /'
@@ -107,6 +163,7 @@ fi
 
 if "${ROOT_CMD[@]}" systemctl is-active --quiet nginx; then
     log "nginx.service is running."
+    _apply_tuning
 else
     fail "nginx.service is not running."
 fi
