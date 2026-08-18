@@ -122,28 +122,15 @@ log "Target domain(s): ${DOMAINS[*]}"
 # ── Resolve admin email (required for the ACME account) ───
 # When a live cert for this domain already exists, certbot reuses it and does
 # NOT require an email prompt — we fall back to a placeholder so the re-apply
-# step below stays non-interactive. Only a fresh issuance needs a real email
-# (from env or an interactive prompt).
-CERT_ALREADY_ISSUED=false
-[[ -d "/etc/letsencrypt/live/${PRIMARY_DOMAIN}" ]] && CERT_ALREADY_ISSUED=true
-EMAIL="${CDSI_CERT_EMAIL:-}"
-if [[ "$CERT_ALREADY_ISSUED" == true ]]; then
-    [[ -z "$EMAIL" ]] && EMAIL="admin@cdsi.local"
-    log_ok "Live cert for ${PRIMARY_DOMAIN} present — reusing it (no email prompt)."
+# ── Resolve admin email (required for the ACME account) ───
+# Default to admin@cdsi.local so the script never blocks on an interactive
+# prompt during re-runs / non-TTY installs. Override with CDSI_CERT_EMAIL.
+EMAIL="${CDSI_CERT_EMAIL:-admin@cdsi.local}"
+if [[ -d "/etc/letsencrypt/live/${PRIMARY_DOMAIN}" ]]; then
+    log_ok "Live cert for ${PRIMARY_DOMAIN} present — reusing it (no new issuance)."
 else
-    if [[ -z "$EMAIL" ]] && [[ -t 0 ]]; then
-        printf "\033[1;34m[CDSI]\033[0m \033[5mEnter admin email for certificate renewal notices:\033[0m "
-        read -r _email_input
-        EMAIL="$(printf '%s' "${_email_input:-}" | tr -d '[:space:]')"
-    fi
-    [[ -n "$EMAIL" ]] || fail "A valid admin email is required to obtain a TLS certificate. Set CDSI_CERT_EMAIL=you@example.com and re-run."
+    log "Using cert email: ${EMAIL}"
 fi
-if [[ -z "$EMAIL" ]] && [[ -t 0 ]]; then
-    printf "\033[1;34m[CDSI]\033[0m \033[5mEnter admin email for certificate renewal notices:\033[0m "
-    read -r _email_input
-    EMAIL="$(printf '%s' "${_email_input:-}" | tr -d '[:space:]')"
-fi
-[[ -n "$EMAIL" ]] || fail "A valid admin email is required to obtain a TLS certificate. Set CDSI_CERT_EMAIL=you@example.com and re-run."
 
 # ── Nginx must be present for --nginx auto-config ──────────
 if [[ "${NGINX_AVAILABLE}" != true ]]; then

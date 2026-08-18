@@ -378,17 +378,12 @@ cdsi_run_install_flow() {
             mkdir -p "${CDSI_ROOT}/config"
             printf '%s\n' "$CDSI_DOMAIN" > "$CDSI_DOMAIN_FILE"
             log_info "Domain set: ${CDSI_DOMAIN} (saved to config/domain)"
-            # Cert admin email is required for the TLS certificate (renewal notices).
-            printf "  %b证书邮箱%b (Cert admin email, for renewal notices): " "${CLR_BLINK}" "${CLR_RESET}"
-            local _email_input=""
-            if ! read -r _email_input; then
-                _email_input=""
-            fi
-            if [[ -n "$_email_input" ]]; then
-                CDSI_CERT_EMAIL="$(printf '%s' "$_email_input" | tr -d '[:space:]')"
-                log_info "Cert admin email set: ${CDSI_CERT_EMAIL}"
-            fi
         fi
+    fi
+    # Cert email: defaults to admin@cdsi.local (used by certbot for the ACME
+    # account). Override with CDSI_CERT_EMAIL=you@example.com if needed.
+    if [[ -z "${CDSI_CERT_EMAIL:-}" ]]; then
+        CDSI_CERT_EMAIL="admin@cdsi.local"
     fi
     export CDSI_DOMAIN CDSI_CERT_EMAIL
 
