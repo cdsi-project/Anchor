@@ -32,6 +32,8 @@ CDSI 的核心原则是：
 
 长期来看，CDSI 希望让每一个创作者都能够拥有自己的数字原点，而不是把全部数字存在建立在第三方平台之上。
 
+> **完整的安装步骤、菜单说明、域名/SSL 配置、常见问题排错，请阅读 [INSTALL.md](INSTALL.md)。**
+
 ---
 
 CDSI is an open-source infrastructure project for creators who want to own and control their digital identity, content, data, and audience relationships.
@@ -267,8 +269,6 @@ The following are planned for later phases and should not be considered implemen
 ---
 
 ## Target Installation Experience
-
-> **完整的安装步骤、菜单说明、域名/SSL 配置、常见问题排错，请阅读 [INSTALL.md](INSTALL.md)。**
 
 The target experience is:
 
