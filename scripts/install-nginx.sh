@@ -104,9 +104,10 @@ gzip_types
     image/svg+xml;
 
 # ── SSL session cache (used by certbot-managed 443 blocks) ──
+# Note: ssl_protocols and ssl_prefer_server_ciphers are already set in
+# nginx.conf; only add session cache here to avoid duplicate directives.
 ssl_session_cache shared:SSL:10m;
 ssl_session_timeout 10m;
-ssl_prefer_server_ciphers on;
 
 # ── Keepalive ──
 keepalive_timeout 65;
