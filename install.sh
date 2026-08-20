@@ -37,13 +37,12 @@ readonly CDSI_PREFLIGHT_SCRIPT="${CDSI_ROOT}/scripts/check-env.sh"
 
 # ── Component Registry ─────────────────────────────────────
 # Parallel arrays: names, descriptions, script paths, done flags.
-CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Supervisor" "Certbot" "WordPress")
-CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "进程守护" "SSL证书" "WordPress站点")
+CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Certbot" "WordPress")
+CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "SSL证书" "WordPress站点")
 CDSI_COMP_SCRIPTS=(
     "${CDSI_ROOT}/scripts/install-nginx.sh"
     "${CDSI_ROOT}/scripts/install-mysql.sh"
     "${CDSI_ROOT}/scripts/install-php.sh"
-    "${CDSI_ROOT}/scripts/install-supervisor.sh"
     "${CDSI_ROOT}/scripts/install-certbot.sh"
     "${CDSI_ROOT}/scripts/install-wordpress.sh"
 )
@@ -236,8 +235,6 @@ cdsi_post_install_report() {
         fi
     done
     [[ -n "$db_svc" ]] && svc_list+=( "$db_svc" )
-    svc_list+=( "supervisor" )
-
     for svc in "${svc_list[@]}"; do
         if command -v systemctl >/dev/null 2>&1; then
             if systemctl is-active --quiet "$svc" 2>/dev/null; then

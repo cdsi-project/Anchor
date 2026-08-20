@@ -79,26 +79,24 @@ Preflight 通过后，按任意键进入主菜单：
   1. Nginx        (HTTP服务)
   2. MySQL        (数据库)
   3. PHP-FPM      (PHP程序)
-  4. Supervisor   (进程守护)
-  5. Certbot      (SSL证书)
-  6. WordPress    (WordPress站点)
+  4. Certbot      (SSL证书)
+  5. WordPress    (WordPress站点)
 ```
 
-- **选 0**：按依赖顺序安装全部 6 个可见组件，完成后自动输出验收报告并退出。
-- **选 1-6**：单独安装某个组件（已安装的会自动跳过，幂等）。
+- **选 0**：按依赖顺序安装全部 5 个可见组件，完成后自动输出验收报告并退出。
+- **选 1-5**：单独安装某个组件（已安装的会自动跳过，幂等）。
 
-### 3.3 六个可见组件说明
+### 3.3 五个可见组件说明
 
 | # | 组件 | 作用 | 幂等跳过条件 |
 |---|------|------|-------------|
 | 1 | Nginx | Web 服务器，反向代理 PHP-FPM | nginx 已装 + active + `nginx -t` 有效 |
 | 2 | MySQL | 数据库，存储 WordPress 数据 | mysql 服务 active |
 | 3 | PHP-FPM | PHP 运行时，执行 WordPress | php + php-fpm 二进制存在 + mysqli 已加载 |
-| 4 | Supervisor | 进程守护（为后续 M1+ 队列/任务准备） | supervisor 服务 active |
-| 5 | Certbot | Let's Encrypt SSL 证书自动签发与续期 | 证书已存在则跳过签发 |
-| 6 | WordPress | 站点应用，配置 Nginx + 安装 WP + 签 SSL | WP 已装（core is-installed） |
+| 4 | Certbot | Let's Encrypt SSL 证书自动签发与续期 | 证书已存在则跳过签发 |
+| 5 | WordPress | 站点应用，配置 Nginx + 安装 WP + 签 SSL | WP 已装（core is-installed） |
 
-**推荐安装顺序**：选 0（全部安装），安装器会按正确依赖顺序执行。单独安装时请按 1→2→3→4→5→6 的顺序。
+**推荐安装顺序**：选 0（全部安装），安装器会按正确依赖顺序执行。单独安装时请按 1→2→3→4→5 的顺序。
 
 ---
 
@@ -116,7 +114,7 @@ sudo ./install.sh
 
 ### 4.2 SSL 证书
 
-- 安装 Certbot 组件（第 6 项）时，自动通过 Let's Encrypt ACME HTTP-01 验证签发免费 SSL 证书。
+- 安装 Certbot 组件时，自动通过 Let's Encrypt ACME HTTP-01 验证签发免费 SSL 证书。
 - **前提**：域名 DNS A 记录已指向服务器 IP，且 80 端口对公网可达。
 - 签发后自动配置 Nginx 80→443 重定向，并启用 `certbot.timer` 自动续期。
 - 证书邮箱默认 `admin@<域名>`（如 `admin@cdsi.example.com`），想用其他邮箱可覆盖：
@@ -152,8 +150,6 @@ sudo bash scripts/install-certbot.sh
   ● nginx           active
   ● php8.5-fpm      active
   ● mysql           active
-  ● redis-server    active
-  ● supervisor      active
 
 ═══ 前台访问检查 ═══
   可访问 OK (HTTP 200)
@@ -205,8 +201,9 @@ sudo bash scripts/install-wordpress.sh
 120 秒，失败后间隔 10 秒重试，最多执行 3 次。安装器不会删除锁文件、
 终止系统更新进程，也不会因 DPKG 锁无限等待。
 
-Redis 暂不出现在 `install.sh` 的交互菜单和“安装全部”流程中；兼容脚本
-`scripts/install-redis.sh` 仍保留，可按需独立运行。
+Redis 和 Supervisor 暂不出现在 `install.sh` 的交互菜单和“安装全部”流程中；
+兼容脚本 `scripts/install-redis.sh` 与 `scripts/install-supervisor.sh` 仍保留，
+可按需独立运行。卸载菜单仍保留对应选项，用于清理历史版本或独立安装的服务。
 
 WP-CLI 与 WordPress 安装包优先从国内 CDN 下载。所有来源下载的文件都必须
 匹配仓库中的 `SHA256SUMS` 才会安装或解压；校验失败时会丢弃文件并尝试
