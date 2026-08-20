@@ -203,6 +203,10 @@ sudo bash scripts/install-wordpress.sh
 Redis 暂不出现在 `install.sh` 的交互菜单和“安装全部”流程中；兼容脚本
 `scripts/install-redis.sh` 仍保留，可按需独立运行。
 
+WP-CLI 与 WordPress 安装包优先从国内 CDN 下载。所有来源下载的文件都必须
+匹配仓库中的 `SHA256SUMS` 才会安装或解压；校验失败时会丢弃文件并尝试
+HTTPS 备用源。CDN 文件升级后，应先与可信来源交叉验证，再更新固定哈希。
+
 install-wordpress.sh 独立运行或从安装菜单单独执行完成后，也会在最后集中显示网站地址、后台地址、WordPress 登录用户、后台密码和 CDSI Atlas Application Password。密码通过终端直接显示，不写入持久安装日志。
 
 ### 6.2 卸载
@@ -301,6 +305,7 @@ chmod 600 password/mysql.pass
 cdsi-bootstrap/
 ├── install.sh                    # 主安装器入口
 ├── uninstall.sh                  # 卸载器
+├── SHA256SUMS                    # CDN 下载文件的固定 SHA-256
 ├── config/
 │   ├── nginx-site.conf.template  # Nginx 站点块模板
 │   └── domain                    # 域名（gitignored，安装时生成）

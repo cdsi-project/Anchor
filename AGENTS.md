@@ -370,7 +370,7 @@ Agents MUST NOT:
 - hardcode production passwords
 - silently ignore failed commands
 - disable TLS verification
-- download executable code over plain HTTP
+- download executable code over plain HTTP without verifying a repository-pinned cryptographic checksum
 - weaken server security merely to make installation easier
 
 Use dedicated application credentials.

@@ -11,6 +11,7 @@
 # Plain text files
 LICENSE text eol=lf
 NOTICE text eol=lf
+SHA256SUMS text eol=lf
 
 # Binary
 *.pdf binary

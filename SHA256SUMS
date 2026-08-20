@@ -1,0 +1,4 @@
+# CDN artifacts used by scripts/install-wordpress.sh.
+# Cross-checked against trusted HTTPS sources on 2026-08-20.
+ce34ddd838f7351d6759068d09793f26755463b4a4610a5a5c0a97b68220d85c  wp-cli.phar
+5c5f50a236dfdc47bd90163eb8d7448513960dc64476e083dc0d0e6163729525  wordpress-7.0.4-zh_CN.zip

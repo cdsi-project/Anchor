@@ -48,6 +48,7 @@ PASS_DIR="${CDSI_ROOT}/password"
 MYSQL_PASS_FILE="${PASS_DIR}/mysql.pass"
 WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
 WP_ATLAS_PASS_FILE="${PASS_DIR}/wordpress-atlas.pass"
+CHECKSUM_FILE="${CDSI_ROOT}/SHA256SUMS"
 
 WEB_ROOT="/var/www"
 WP_DIR="${WEB_ROOT}/wordpress"
@@ -103,6 +104,79 @@ detect_php_fpm() {
     echo "$v"
 }
 
+# ── Checksum-verified artifact downloads ───────────────────
+checksum_for_artifact() {
+    local artifact="$1"
+    local -a matches=()
+
+    if [[ ! -r "$CHECKSUM_FILE" ]]; then
+        log_fail "Checksum file not found: ${CHECKSUM_FILE}"
+        return 1
+    fi
+    mapfile -t matches < <(
+        awk -v artifact="$artifact" '$2 == artifact { print tolower($1) }' \
+            "$CHECKSUM_FILE"
+    )
+    if [[ ${#matches[@]} -ne 1 ]]; then
+        log_fail "Expected exactly one SHA-256 entry for ${artifact} in ${CHECKSUM_FILE}."
+        return 1
+    fi
+    if [[ ! "${matches[0]}" =~ ^[0-9a-f]{64}$ ]]; then
+        log_fail "Invalid SHA-256 entry for ${artifact} in ${CHECKSUM_FILE}."
+        return 1
+    fi
+    printf '%s\n' "${matches[0]}"
+}
+
+download_verified_artifact() {
+    local destination="$1"
+    local artifact="$2"
+    shift 2
+
+    command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
+
+    local expected actual url
+    if ! expected="$(checksum_for_artifact "$artifact")"; then
+        return 1
+    fi
+    if ! rm -f -- "$destination"; then
+        log_fail "Could not prepare the download path for ${artifact}."
+        return 1
+    fi
+    local partial
+    if ! partial="$(mktemp "${destination}.part.XXXXXX")"; then
+        log_fail "Could not create a secure temporary file for ${artifact}."
+        return 1
+    fi
+
+    for url in "$@"; do
+        log "Downloading ${artifact} from ${url}..."
+        if curl -fsSL --retry 2 --connect-timeout 15 --max-time 900 \
+            --speed-limit 1024 --speed-time 60 \
+            -o "$partial" "$url" 2>/dev/null; then
+            if ! actual="$(sha256sum "$partial" 2>/dev/null | awk '{print tolower($1)}')"; then
+                log_fail "Could not calculate SHA-256 for ${artifact} from ${url}."
+                continue
+            fi
+            if [[ "$actual" == "$expected" ]]; then
+                if ! mv -f -- "$partial" "$destination"; then
+                    log_fail "Could not finalize the verified ${artifact} download."
+                    rm -f -- "$partial" 2>/dev/null || true
+                    return 1
+                fi
+                log_ok "SHA-256 verified for ${artifact}."
+                return 0
+            fi
+            log_fail "SHA-256 mismatch for ${artifact} from ${url}; rejecting download."
+        else
+            log_fail "Download failed for ${artifact} from ${url}."
+        fi
+    done
+
+    rm -f -- "$partial" 2>/dev/null || true
+    return 1
+}
+
 # ══════════════════════════════════════════════════════════
 # 1) Provision PHP runtime (php-fpm + php-mysql + wp-cli)
 # ══════════════════════════════════════════════════════════
@@ -112,28 +186,29 @@ install_wpcli() {
         log "wp-cli already present."
         return 0
     fi
-    log "Installing wp-cli from official HTTPS sources..."
-    # No bundled phar is shipped; fetch only over TLS. jsDelivr is retained as
-    # an HTTPS fallback for networks that cannot reach GitHub directly.
+    log "Installing checksum-verified wp-cli..."
+    # The domestic CDN is intentionally HTTP; SHA256SUMS pins the trusted bytes.
+    # HTTPS mirrors remain available when the CDN cannot be reached.
     local urls=(
-        "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
+        "http://cdn.aicsi.cn/packages/wp-cli.phar"
         "https://cdn.jsdelivr.net/gh/wp-cli/builds@gh-pages/phar/wp-cli.phar"
+        "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
     )
-    local ok=0
-    for u in "${urls[@]}"; do
-        if ${SUDO} curl -fsSL --retry 2 --connect-timeout 15 --max-time 900 \
-            --speed-limit 1024 --speed-time 60 \
-            -o /tmp/wp-cli.phar "$u" 2>/dev/null \
-           && [[ -s /tmp/wp-cli.phar ]] \
-           && [[ $(wc -c < /tmp/wp-cli.phar) -gt 1000000 ]]; then
-            ok=1
-            break
-        fi
-        ${SUDO} rm -f /tmp/wp-cli.phar
-    done
-    [[ $ok -eq 1 ]] || fail "Failed to download a valid wp-cli phar."
-    ${SUDO} cp /tmp/wp-cli.phar /usr/local/bin/wp
-    ${SUDO} chmod +x /usr/local/bin/wp
+    local download_dir downloaded_phar
+    download_dir="$(mktemp -d "${TMPDIR:-/tmp}/cdsi-wpcli.XXXXXX")" \
+        || fail "Could not create a secure wp-cli download directory."
+    downloaded_phar="${download_dir}/wp-cli.phar"
+    if ! download_verified_artifact "$downloaded_phar" wp-cli.phar "${urls[@]}"; then
+        rm -rf -- "$download_dir"
+        fail "Failed to download a checksum-verified wp-cli phar."
+    fi
+    if ! ${SUDO} install -m 0755 "$downloaded_phar" /usr/local/bin/wp; then
+        rm -rf -- "$download_dir"
+        fail "wp-cli install failed."
+    fi
+    if ! rm -rf -- "$download_dir"; then
+        log_fail "Could not remove the temporary wp-cli download directory: ${download_dir}"
+    fi
     command -v wp >/dev/null 2>&1 || fail "wp-cli install failed."
     log_ok "wp-cli installed."
 }
@@ -174,7 +249,11 @@ provision_php() {
 # ══════════════════════════════════════════════════════════
 # 2) Download WordPress package (zh_CN build) from the CDN and unzip
 # ══════════════════════════════════════════════════════════
-WP_PACKAGE_URL="https://cn.wordpress.org/wordpress-7.0.4-zh_CN.zip"
+WP_PACKAGE_NAME="wordpress-7.0.4-zh_CN.zip"
+WP_PACKAGE_URLS=(
+    "http://cdn.aicsi.cn/packages/${WP_PACKAGE_NAME}"
+    "https://cn.wordpress.org/${WP_PACKAGE_NAME}"
+)
 
 download_wordpress() {
     if [[ -f "${WP_DIR}/wp-load.php" ]]; then
@@ -190,26 +269,47 @@ download_wordpress() {
             || fail "Failed to install unzip."
     fi
 
-    log "Downloading WordPress (zh_CN) package from CDN: ${WP_PACKAGE_URL}"
-    ${SUDO} mkdir -p "$WEB_ROOT"
-    ${SUDO} rm -rf /tmp/wp-latest
-    ${SUDO} mkdir -p /tmp/wp-latest
-    ${SUDO} curl -fsSL --retry 2 --connect-timeout 15 --max-time 900 \
-        --speed-limit 1024 --speed-time 60 \
-        -o /tmp/wp-latest/wordpress.zip "${WP_PACKAGE_URL}" \
-        || fail "Failed to download WordPress package from ${WP_PACKAGE_URL}."
-    ${SUDO} unzip -q -o /tmp/wp-latest/wordpress.zip -d /tmp/wp-latest \
-        || fail "Failed to extract WordPress zip package."
+    log "Downloading checksum-verified WordPress (zh_CN) package..."
+    local download_dir archive extract_dir
+    download_dir="$(mktemp -d "${TMPDIR:-/tmp}/cdsi-wordpress.XXXXXX")" \
+        || fail "Could not create a secure WordPress download directory."
+    archive="${download_dir}/${WP_PACKAGE_NAME}"
+    extract_dir="${download_dir}/extracted"
+    if ! mkdir "$extract_dir"; then
+        rm -rf -- "$download_dir"
+        fail "Could not create the WordPress extraction directory."
+    fi
+    if ! download_verified_artifact "$archive" "$WP_PACKAGE_NAME" \
+        "${WP_PACKAGE_URLS[@]}"; then
+        rm -rf -- "$download_dir"
+        fail "Failed to download a checksum-verified WordPress package."
+    fi
+    if ! unzip -q -o "$archive" -d "$extract_dir"; then
+        rm -rf -- "$download_dir"
+        fail "Failed to extract WordPress zip package."
+    fi
+    if ! ${SUDO} mkdir -p "$WEB_ROOT" "$WP_DIR"; then
+        rm -rf -- "$download_dir"
+        fail "Failed to prepare the WordPress web root."
+    fi
 
     # Most WordPress builds (including the official one) nest files under a
     # 'wordpress/' directory; fall back to the flat layout if not present.
-    if [[ -d /tmp/wp-latest/wordpress ]]; then
-        ${SUDO} cp -a /tmp/wp-latest/wordpress/. "$WP_DIR"/
+    if [[ -d "${extract_dir}/wordpress" ]]; then
+        if ! ${SUDO} cp -a "${extract_dir}/wordpress/." "$WP_DIR"/; then
+            rm -rf -- "$download_dir"
+            fail "Failed to copy WordPress files to ${WP_DIR}."
+        fi
     else
-        ${SUDO} cp -a /tmp/wp-latest/. "$WP_DIR"/
+        if ! ${SUDO} cp -a "${extract_dir}/." "$WP_DIR"/; then
+            rm -rf -- "$download_dir"
+            fail "Failed to copy WordPress files to ${WP_DIR}."
+        fi
     fi
 
-    ${SUDO} rm -rf /tmp/wp-latest
+    if ! rm -rf -- "$download_dir"; then
+        log_fail "Could not remove the temporary WordPress download directory: ${download_dir}"
+    fi
     [[ -f "${WP_DIR}/wp-load.php" ]] || fail "WordPress extraction did not produce wp-load.php."
     log_ok "WordPress files placed at ${WP_DIR}."
 }
