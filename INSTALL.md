@@ -79,28 +79,26 @@ Preflight 通过后，按任意键进入主菜单：
   1. Nginx        (HTTP服务)
   2. MySQL        (数据库)
   3. PHP-FPM      (PHP程序)
-  4. Redis        (Redis数据库)
-  5. Supervisor   (进程守护)
-  6. Certbot      (SSL证书)
-  7. WordPress    (WordPress站点)
+  4. Supervisor   (进程守护)
+  5. Certbot      (SSL证书)
+  6. WordPress    (WordPress站点)
 ```
 
-- **选 0**：按依赖顺序安装全部 7 个组件，完成后自动输出验收报告并退出。
-- **选 1-7**：单独安装某个组件（已安装的会自动跳过，幂等）。
+- **选 0**：按依赖顺序安装全部 6 个可见组件，完成后自动输出验收报告并退出。
+- **选 1-6**：单独安装某个组件（已安装的会自动跳过，幂等）。
 
-### 3.3 七个组件说明
+### 3.3 六个可见组件说明
 
 | # | 组件 | 作用 | 幂等跳过条件 |
 |---|------|------|-------------|
 | 1 | Nginx | Web 服务器，反向代理 PHP-FPM | nginx 已装 + active + `nginx -t` 有效 |
 | 2 | MySQL | 数据库，存储 WordPress 数据 | mysql 服务 active |
 | 3 | PHP-FPM | PHP 运行时，执行 WordPress | php + php-fpm 二进制存在 + mysqli 已加载 |
-| 4 | Redis | 内存缓存 | redis-server 服务 active |
-| 5 | Supervisor | 进程守护（为后续 M1+ 队列/任务准备） | supervisor 服务 active |
-| 6 | Certbot | Let's Encrypt SSL 证书自动签发与续期 | 证书已存在则跳过签发 |
-| 7 | WordPress | 站点应用，配置 Nginx + 安装 WP + 签 SSL | WP 已装（core is-installed） |
+| 4 | Supervisor | 进程守护（为后续 M1+ 队列/任务准备） | supervisor 服务 active |
+| 5 | Certbot | Let's Encrypt SSL 证书自动签发与续期 | 证书已存在则跳过签发 |
+| 6 | WordPress | 站点应用，配置 Nginx + 安装 WP + 签 SSL | WP 已装（core is-installed） |
 
-**推荐安装顺序**：选 0（全部安装），安装器会按正确依赖顺序执行。单独安装时请按 1→2→3→4→5→6→7 的顺序。
+**推荐安装顺序**：选 0（全部安装），安装器会按正确依赖顺序执行。单独安装时请按 1→2→3→4→5→6 的顺序。
 
 ---
 
@@ -201,6 +199,9 @@ sudo bash scripts/install-wordpress.sh
 ```
 
 每个脚本独立可用，幂等（已装则跳过）。
+
+Redis 暂不出现在 `install.sh` 的交互菜单和“安装全部”流程中；兼容脚本
+`scripts/install-redis.sh` 仍保留，可按需独立运行。
 
 install-wordpress.sh 独立运行或从安装菜单单独执行完成后，也会在最后集中显示网站地址、后台地址、WordPress 登录用户、后台密码和 CDSI Atlas Application Password。密码通过终端直接显示，不写入持久安装日志。
 
