@@ -200,6 +200,11 @@ sudo bash scripts/install-wordpress.sh
 
 每个脚本独立可用，幂等（已装则跳过）。
 
+所有安装脚本的 `apt-get` 操作都带有有界重试。遇到系统启动后的
+`unattended-upgrades`、`apt-daily` 等进程占用 DPKG 锁时，单次最多等待
+120 秒，失败后间隔 10 秒重试，最多执行 3 次。安装器不会删除锁文件、
+终止系统更新进程，也不会因 DPKG 锁无限等待。
+
 Redis 暂不出现在 `install.sh` 的交互菜单和“安装全部”流程中；兼容脚本
 `scripts/install-redis.sh` 仍保留，可按需独立运行。
 
@@ -321,10 +326,13 @@ cdsi-bootstrap/
 │   ├── configure.sh              # 配置（M1+）
 │   └── health.sh                 # 健康检查（M1+）
 ├── lib/
+│   ├── apt.sh                    # apt-get 锁等待与有界重试
 │   ├── common.sh                 # 颜色、常量、工具函数
 │   ├── logger.sh                 # 日志
 │   ├── system.sh                 # 系统工具
 │   └── wordpress-access.sh       # WordPress / Atlas 最终访问信息
+├── tests/
+│   └── test-apt.sh               # apt-get 重试单元测试
 ├── password/                     # 密码文件（gitignored，安装时生成）
 │   ├── mysql.pass
 │   ├── redis.pass

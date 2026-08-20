@@ -15,6 +15,11 @@ fail() {
     exit 1
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=../lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
+
 php_extension_loaded() {
     local extension="$1"
     PHP_EXTENSION_NAME="$extension" "${PHP_BIN}" \
@@ -57,8 +62,7 @@ install_php_extension() {
     fi
 
     log "Installing ${package} for PHP extension ${extension}..."
-    if ! "${ROOT_CMD[@]}" env DEBIAN_FRONTEND=noninteractive \
-        apt-get install -y "$package"; then
+    if ! cdsi_apt_get install -y "$package"; then
         if [[ "$required" == true ]]; then
             fail "Could not install required PHP extension ${extension} from ${package}."
         fi
@@ -155,13 +159,12 @@ PHP_PACKAGES=(
 )
 
 log "Updating Ubuntu package metadata..."
-if ! "${ROOT_CMD[@]}" apt-get update; then
+if ! cdsi_apt_get update; then
     fail "apt-get update failed. Check the configured Ubuntu sources and network connectivity."
 fi
 
 log "Installing PHP packages from the Ubuntu repositories..."
-if ! "${ROOT_CMD[@]}" env DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y "${PHP_PACKAGES[@]}"; then
+if ! cdsi_apt_get install -y "${PHP_PACKAGES[@]}"; then
     fail "PHP package installation failed."
 fi
 

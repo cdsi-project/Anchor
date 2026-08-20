@@ -21,6 +21,11 @@ fail() {
     exit 1
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=../lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
+
 # ── Root Check ─────────────────────────────────────────────
 if [[ "${EUID}" -eq 0 ]]; then
     SUDO=""
@@ -53,8 +58,9 @@ fi
 
 # ── Install Supervisor (system default apt source) ────────
 log "Installing Supervisor from the system default apt source..."
-${SUDO} apt-get update -qq || log "apt-get update had warnings, continuing..."
-DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y -qq supervisor || \
+cdsi_apt_get update -qq \
+    || log "apt-get update failed after retries; continuing with cached package metadata..."
+cdsi_apt_get install -y -qq supervisor || \
     fail "apt-get install supervisor failed."
 
 command -v supervisord >/dev/null 2>&1 || fail "supervisord was not installed."

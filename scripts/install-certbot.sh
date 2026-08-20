@@ -41,6 +41,9 @@ fail() {
     exit 1
 }
 
+# shellcheck source=../lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
+
 # ── Root Check ─────────────────────────────────────────────
 if [[ "${EUID}" -eq 0 ]]; then
     SUDO=""
@@ -68,8 +71,9 @@ if command -v certbot >/dev/null 2>&1; then
     log "Certbot is already installed: $(certbot --version 2>&1)"
 else
     log "Installing Certbot + Nginx plugin from the system apt source..."
-    ${SUDO} apt-get update -qq || log "apt-get update had warnings, continuing..."
-    DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y -qq \
+    cdsi_apt_get update -qq \
+        || log "apt-get update failed after retries; continuing with cached package metadata..."
+    cdsi_apt_get install -y -qq \
         certbot python3-certbot-nginx || fail "apt-get install certbot failed."
     command -v certbot >/dev/null 2>&1 || fail "certbot was not installed."
     log_ok "Certbot installed: $(certbot --version 2>&1)"
@@ -78,7 +82,7 @@ fi
 # Ensure the Nginx plugin is present (needed for --nginx auto-config).
 if ! ${SUDO} certbot plugins 2>/dev/null | grep -q "nginx"; then
     log "Installing the Certbot Nginx plugin..."
-    DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y -qq \
+    cdsi_apt_get install -y -qq \
         python3-certbot-nginx || fail "apt-get install python3-certbot-nginx failed."
 fi
 ${SUDO} certbot plugins 2>/dev/null | grep -q "nginx" \

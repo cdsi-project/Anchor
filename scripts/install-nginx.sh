@@ -16,6 +16,11 @@ fail() {
     exit 1
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=../lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
+
 # ── Root Check ─────────────────────────────────────────────
 if [[ "${EUID}" -eq 0 ]]; then
     ROOT_CMD=()
@@ -149,12 +154,12 @@ fi
 
 # ── Install ───────────────────────────────────────────────
 log "Updating Ubuntu package metadata..."
-if ! "${ROOT_CMD[@]}" apt-get update; then
+if ! cdsi_apt_get update; then
     fail "apt-get update failed. Check the configured Ubuntu sources and network connectivity."
 fi
 
 log "Installing Nginx from the Ubuntu repositories..."
-if ! "${ROOT_CMD[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y nginx; then
+if ! cdsi_apt_get install -y nginx; then
     fail "Nginx package installation failed."
 fi
 

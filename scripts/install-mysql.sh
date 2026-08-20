@@ -40,7 +40,10 @@ fi
 
 # ── Paths ──────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PASS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/password"
+CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=../lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
+PASS_DIR="${CDSI_ROOT}/password"
 PASS_FILE="${PASS_DIR}/mysql.pass"
 
 DB_NAME="cdsi"
@@ -87,9 +90,10 @@ fi
 if ! command -v mysql >/dev/null 2>&1; then
     log "Installing MySQL from system default apt source..."
 
-    ${SUDO} apt-get update -qq || log "apt-get update had warnings, continuing..."
+    cdsi_apt_get update -qq \
+        || log "apt-get update failed after retries; continuing with cached package metadata..."
 
-    DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y -qq mysql-server || \
+    cdsi_apt_get install -y -qq mysql-server || \
         fail "apt-get install mysql-server failed."
 
     ${SUDO} systemctl enable mysql >/dev/null 2>&1 || true

@@ -44,6 +44,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=../lib/wordpress-access.sh
 source "${CDSI_ROOT}/lib/wordpress-access.sh"
+# shellcheck source=../lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
 PASS_DIR="${CDSI_ROOT}/password"
 MYSQL_PASS_FILE="${PASS_DIR}/mysql.pass"
 WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
@@ -228,10 +230,11 @@ provision_php() {
     fi
 
     log "Installing PHP-FPM, MySQL driver and wp-cli..."
-    ${SUDO} apt-get update -qq || log "apt-get update had warnings, continuing..."
+    cdsi_apt_get update -qq \
+        || log "apt-get update failed after retries; continuing with cached package metadata..."
 
     # Install php-fpm + common extensions. Use the PHP reported by `php`.
-    DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y -qq \
+    cdsi_apt_get install -y -qq \
         "php${phpver}-fpm" "php${phpver}-mysql" "php${phpver}-cli" \
         "php${phpver}-curl" "php${phpver}-gd" "php${phpver}-mbstring" \
         "php${phpver}-xml" "php${phpver}-zip" || fail "PHP package installation failed."
@@ -264,8 +267,9 @@ download_wordpress() {
     # unzip is required to extract the package
     if ! command -v unzip >/dev/null 2>&1; then
         log "Installing unzip (required to extract the package)..."
-        ${SUDO} apt-get update -qq || true
-        DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y -qq unzip \
+        cdsi_apt_get update -qq \
+            || log "apt-get update failed after retries; continuing with cached package metadata..."
+        cdsi_apt_get install -y -qq unzip \
             || fail "Failed to install unzip."
     fi
 
