@@ -291,6 +291,7 @@ uninstall_wordpress() {
     fi
     do_rm /var/www/wordpress
     do_rm "${PASS_DIR}/wordpress.pass"
+    do_rm "${PASS_DIR}/wordpress-atlas.pass"
     do_rm /usr/local/bin/wp
     log_ok "WordPress 已卸载 (站点 / 数据库 / 凭据 / wp-cli 已清理)。"
 }
@@ -326,7 +327,7 @@ comp_what() {
         redis)     echo "redis-server 包 + /etc/redis + password/redis.pass" ;;
         supervisor) echo "supervisor 包 + /etc/supervisor" ;;
         certbot)   echo "certbot/python3-certbot-nginx 包 + /etc/letsencrypt 证书 + Nginx SSL 指令" ;;
-        wordpress) echo "/var/www/wordpress + Nginx 站点块 + cdsi 库 + password/wordpress.pass + wp-cli" ;;
+        wordpress) echo "/var/www/wordpress + Nginx 站点块 + cdsi 库 + WordPress/Atlas 凭据 + wp-cli" ;;
     esac
 }
 

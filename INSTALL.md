@@ -157,17 +157,20 @@ sudo bash scripts/install-certbot.sh
   ● redis-server    active
   ● supervisor      active
 
-═══ 网站地址 ═══
-  前台:   https://cdsi.example.com
-  后台:   https://cdsi.example.com/wp-admin/
-  前台访问: 200 OK ✓
+═══ 前台访问检查 ═══
+  可访问 OK (HTTP 200)
 
-═══ 登录凭据 ═══
-  WordPress:
-    user: cdsi
-    pass: ********
-  MySQL root:
-    pass: ********
+═══ WordPress 网站与登录信息 ═══
+  网站地址: https://cdsi.example.com
+  后台地址: https://cdsi.example.com/wp-admin/
+  登录用户: cdsi
+  登录密码: ********
+
+  CDSI Atlas OpenWeb 配置:
+  源站域名: cdsi.example.com
+  登录用户: cdsi
+  应用名称: CDSI Atlas
+  应用密码: ************************
 ```
 
 密码文件存储在 `password/` 目录（mode 600，不提交到 git）：
@@ -176,7 +179,8 @@ sudo bash scripts/install-certbot.sh
 |------|------|
 | `password/mysql.pass` | MySQL root 密码 + cdsi 用户密码 |
 | `password/redis.pass` | Redis 密码 |
-| `password/wordpress.pass` | WordPress 管理员用户名 + 密码 |
+| `password/wordpress.pass` | WordPress 管理员用户名 + 登录密码 |
+| `password/wordpress-atlas.pass` | CDSI Atlas 用户名 + WordPress Application Password |
 
 随时通过主菜单「3 查看密码」查看。
 
@@ -197,6 +201,8 @@ sudo bash scripts/install-wordpress.sh
 ```
 
 每个脚本独立可用，幂等（已装则跳过）。
+
+install-wordpress.sh 独立运行或从安装菜单单独执行完成后，也会在最后集中显示网站地址、后台地址、WordPress 登录用户、后台密码和 CDSI Atlas Application Password。密码通过终端直接显示，不写入持久安装日志。
 
 ### 6.2 卸载
 
@@ -266,6 +272,16 @@ cat password/wordpress.pass
 # 或安装器主菜单选 3
 ```
 
+CDSI Atlas 使用独立、可撤销的 WordPress Application Password：
+
+```bash
+cat password/wordpress-atlas.pass
+```
+
+Application Password 的明文只在创建时由 WordPress 返回。若 WordPress 中的 `CDSI Atlas` 记录仍存在、但该凭据文件丢失，安装器不会静默创建重复凭据；请先显式轮换该记录，再重新运行 WordPress 安装脚本。
+
+Atlas 的“源站域名”配置只接受裸域名（例如 `cdsi.example.com`），不要填写 `https://`、端口或路径。Atlas 固定通过 HTTPS 发布；IP 安装或证书尚未生效时，安装器会保存 Application Password，但会将 Atlas 标记为暂不可用。
+
 ### Q: 如何修改 MySQL root 密码？
 
 密码在安装时随机生成并存储在 `password/mysql.pass`。修改密码后同步更新文件：
@@ -301,11 +317,13 @@ cdsi-bootstrap/
 ├── lib/
 │   ├── common.sh                 # 颜色、常量、工具函数
 │   ├── logger.sh                 # 日志
-│   └── system.sh                 # 系统工具
+│   ├── system.sh                 # 系统工具
+│   └── wordpress-access.sh       # WordPress / Atlas 最终访问信息
 ├── password/                     # 密码文件（gitignored，安装时生成）
 │   ├── mysql.pass
 │   ├── redis.pass
-│   └── wordpress.pass
+│   ├── wordpress.pass
+│   └── wordpress-atlas.pass
 ├── templates/                    # 模板资源
 ├── docs/                         # 文档
 ├── AGENTS.md                     # AI Agent 工程契约

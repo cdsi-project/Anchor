@@ -23,6 +23,8 @@ source "${CDSI_ROOT}/lib/common.sh"
 source "${CDSI_ROOT}/lib/logger.sh"
 # shellcheck source=lib/system.sh
 source "${CDSI_ROOT}/lib/system.sh"
+# shellcheck source=lib/wordpress-access.sh
+source "${CDSI_ROOT}/lib/wordpress-access.sh"
 
 # Scripts under scripts/ are standalone commands. The installer invokes them
 # as subprocesses so direct execution and orchestrated execution use the same
@@ -117,9 +119,10 @@ cdsi_show_menu() {
 
 # Run a single component install by index.
 # Executes the component's install script as a subprocess.
-# Args: <index 0-based>
+# Args: <index 0-based> [install context]
 cdsi_install_component() {
     local idx="$1"
+    local install_context="${2:-single}"
     local name="${CDSI_COMP_NAMES[$idx]}"
     local script="${CDSI_COMP_SCRIPTS[$idx]}"
     local rc=0
@@ -141,7 +144,7 @@ cdsi_install_component() {
 
     CDSI_CURRENT_STAGE="INSTALL_${name^^}"
     log_info "Installing ${name}..."
-    if bash "$script"; then
+    if env CDSI_INSTALL_CONTEXT="$install_context" bash "$script"; then
         CDSI_COMP_DONE[$idx]=true
         log_success "${name} installation complete."
         CDSI_CURRENT_STAGE="MENU"
@@ -164,7 +167,7 @@ cdsi_install_all() {
     local i
     for i in "${!CDSI_COMP_NAMES[@]}"; do
         if [[ "${CDSI_COMP_DONE[$i]}" != true && "${CDSI_COMP_UNAVAILABLE[$i]}" != true ]]; then
-            cdsi_install_component "$i"
+            cdsi_install_component "$i" all
         fi
     done
 }
@@ -251,30 +254,21 @@ cdsi_post_install_report() {
         printf "    %-18s %b\n" "$svc" "$state"
     done
 
-    # ── 2. Site URLs ──
-    printf "\n  %b网站地址 / Site URLs%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
+    # Resolve the final site URL once for reachability and the final access block.
     local domain="${CDSI_DOMAIN:-}"
     if [[ -z "$domain" && -f "${CDSI_ROOT}/config/domain" ]]; then
-        domain="$(cat "${CDSI_ROOT}/config/domain" 2>/dev/null | head -1 | tr -d '[:space:]')"
+        domain="$(head -1 "${CDSI_ROOT}/config/domain" 2>/dev/null | tr -d '[:space:]')"
     fi
-    local site_url server_ip
-    if [[ -n "$domain" ]]; then
-        if [[ -d "/etc/letsencrypt/live/${domain}" ]]; then
-            site_url="https://${domain}"
-        else
-            site_url="http://${domain}"
+    local site_url server_ip="" fallback_url=""
+    if [[ -z "$domain" ]]; then
+        server_ip="$(cdsi_resolve_wordpress_server_ip)"
+        if [[ -n "$server_ip" ]]; then
+            fallback_url="http://${server_ip}"
         fi
-    else
-        server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-        if [[ -z "$server_ip" ]]; then
-            server_ip="$(curl -s --max-time 5 ifconfig.me 2>/dev/null || true)"
-        fi
-        site_url="http://${server_ip:-<server-ip>}"
     fi
-    printf "    %b前台%b  %s\n" "${CLR_BOLD}" "${CLR_RESET}" "$site_url"
-    printf "    %b后台%b  %s/wp-admin/\n" "${CLR_BOLD}" "${CLR_RESET}" "$site_url"
+    site_url="$(cdsi_resolve_wordpress_url "/var/www/wordpress" "$domain" "$fallback_url")"
 
-    # ── 3. Frontend reachability ──
+    # ── 2. Frontend reachability ──
     printf "\n  %b前台访问检查 / Frontend Check%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
     local http_code
     http_code="$(curl -sL -o /dev/null -m 12 -w '%{http_code}' "$site_url" 2>/dev/null || echo '000')"
@@ -284,29 +278,26 @@ cdsi_post_install_report() {
         printf "    %b未能访问%b  (HTTP %s) — 请检查 Nginx / DNS / 防火墙\n" "${CLR_YELLOW}" "${CLR_RESET}" "$http_code"
     fi
 
-    # ── 4. Credentials ──
-    printf "\n  %b登录凭据 / Credentials%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
-    local wp_pass="${CDSI_ROOT}/password/wordpress.pass"
-    if [[ -f "$wp_pass" ]]; then
-        local un pw
-        un="$(grep '^user:' "$wp_pass" 2>/dev/null | cut -d: -f2-)"
-        pw="$(grep '^pass:' "$wp_pass" 2>/dev/null | cut -d: -f2-)"
-        printf "    %bWordPress 后台登录 / WP Admin%b\n" "${CLR_BOLD}" "${CLR_RESET}"
-        printf "        登录名 User: %s\n" "${un:-cdsi}"
-        printf "        密  码 Pass: %s\n" "${pw:-<见 password/wordpress.pass>}"
-    else
-        printf "    %bWordPress 凭据文件未找到：%s%b\n" "${CLR_YELLOW}" "$wp_pass" "${CLR_RESET}"
-    fi
+    # ── 3. Database credentials ──
+    printf "\n  %b数据库凭据 / Database Credentials%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
     local mysql_pass="${CDSI_ROOT}/password/mysql.pass"
     if [[ -f "$mysql_pass" ]]; then
         local rootpw
-        rootpw="$(grep '^root:' "$mysql_pass" 2>/dev/null | cut -d: -f2-)"
+        rootpw="$(grep '^root:' "$mysql_pass" 2>/dev/null | cut -d: -f2- || true)"
         printf "    %bMySQL 数据库 / Database%b\n" "${CLR_BOLD}" "${CLR_RESET}"
         printf "        root 密码: %s\n" "${rootpw:-<见 password/mysql.pass>}"
+    else
+        printf "    %bMySQL 凭据文件未找到：%s%b\n" "${CLR_YELLOW}" "$mysql_pass" "${CLR_RESET}"
     fi
 
+    # ── 4. WordPress access details (keep this as the final result block) ──
+    local wp_pass="${CDSI_ROOT}/password/wordpress.pass"
+    local wp_atlas_pass="${CDSI_ROOT}/password/wordpress-atlas.pass"
+    cdsi_print_wordpress_access "$site_url" "$wp_pass" "cdsi" \
+        "$wp_atlas_pass" "$domain"
+
     log_blank
-    log_info "以上凭据保存在 password/ 目录（mode 600），请勿提交到版本库。"
+    log_info "以上凭据仅显示在当前终端，并保存在 password/ 目录（mode 600）；请勿提交到版本库。"
     log_separator
 }
 

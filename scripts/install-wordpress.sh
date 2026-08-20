@@ -4,8 +4,9 @@
 # Downloads the latest WordPress, provisions it against the
 # existing `cdsi` MySQL database (credentials from password/mysql.pass),
 # and creates an admin user `cdsi` with a random 10-char password.
-# The admin username and password are both saved to password/wordpress.pass
-# (format: user:<name> / pass:<password>).
+# The admin username/password are saved to password/wordpress.pass. A separate
+# WordPress Application Password for CDSI Atlas is saved to
+# password/wordpress-atlas.pass so it can be revoked independently.
 #
 # Also wires the LEMP stack so the site is reachable:
 #   • installs php-fpm + php-mysql + wp-cli if missing
@@ -41,9 +42,12 @@ fi
 # ── Paths / Config ────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=../lib/wordpress-access.sh
+source "${CDSI_ROOT}/lib/wordpress-access.sh"
 PASS_DIR="${CDSI_ROOT}/password"
 MYSQL_PASS_FILE="${PASS_DIR}/mysql.pass"
 WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
+WP_ATLAS_PASS_FILE="${PASS_DIR}/wordpress-atlas.pass"
 
 WEB_ROOT="/var/www"
 WP_DIR="${WEB_ROOT}/wordpress"
@@ -67,11 +71,16 @@ if [[ -n "${CDSI_DOMAIN:-}" ]]; then
     log "Domain provided: ${WP_DOMAIN} (site URL → ${WP_URL})"
 else
     WP_DOMAIN=""
-    WP_URL="http://8.140.192.151"
+    SERVER_IP="$(cdsi_resolve_wordpress_server_ip)"
+    [[ -n "$SERVER_IP" ]] || fail "Could not determine the server IP. Set CDSI_SERVER_IP and run again."
+    WP_URL="http://${SERVER_IP}"
 fi
 WP_TITLE="CDSI Node"
 WP_ADMIN_USER="cdsi"
 WP_ADMIN_EMAIL="admin@cdsi.local"
+WP_ATLAS_APP_NAME="CDSI Atlas"
+# Stable UUIDv5 for the canonical CDSI Atlas application URL.
+WP_ATLAS_APP_ID="3549dd9a-23b7-5dbb-a9ef-78f9537c69ac"
 
 # ── Read cdsi DB password from password/mysql.pass ────────
 [[ -f "$MYSQL_PASS_FILE" ]] || fail "MySQL credential file not found: ${MYSQL_PASS_FILE}. Run install-mysql.sh first."
@@ -103,17 +112,18 @@ install_wpcli() {
         log "wp-cli already present."
         return 0
     fi
-    log "Installing wp-cli from CDN..."
-    # No bundled phar is shipped; always fetch over the network. Primary mirror:
-    # cdn.aicsi.cn (reliable in CN regions). jsDelivr kept as a secondary
-    # fallback in case the CDN is unreachable.
+    log "Installing wp-cli from official HTTPS sources..."
+    # No bundled phar is shipped; fetch only over TLS. jsDelivr is retained as
+    # an HTTPS fallback for networks that cannot reach GitHub directly.
     local urls=(
-        "http://cdn.aicsi.cn/packages/wp-cli.phar"
+        "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
         "https://cdn.jsdelivr.net/gh/wp-cli/builds@gh-pages/phar/wp-cli.phar"
     )
     local ok=0
     for u in "${urls[@]}"; do
-        if ${SUDO} curl -fsSL --retry 3 -o /tmp/wp-cli.phar "$u" 2>/dev/null \
+        if ${SUDO} curl -fsSL --retry 2 --connect-timeout 15 --max-time 900 \
+            --speed-limit 1024 --speed-time 60 \
+            -o /tmp/wp-cli.phar "$u" 2>/dev/null \
            && [[ -s /tmp/wp-cli.phar ]] \
            && [[ $(wc -c < /tmp/wp-cli.phar) -gt 1000000 ]]; then
             ok=1
@@ -164,7 +174,7 @@ provision_php() {
 # ══════════════════════════════════════════════════════════
 # 2) Download WordPress package (zh_CN build) from the CDN and unzip
 # ══════════════════════════════════════════════════════════
-WP_PACKAGE_URL="http://cdn.aicsi.cn/packages/wordpress-7.0.4-zh_CN.zip"
+WP_PACKAGE_URL="https://cn.wordpress.org/wordpress-7.0.4-zh_CN.zip"
 
 download_wordpress() {
     if [[ -f "${WP_DIR}/wp-load.php" ]]; then
@@ -184,7 +194,9 @@ download_wordpress() {
     ${SUDO} mkdir -p "$WEB_ROOT"
     ${SUDO} rm -rf /tmp/wp-latest
     ${SUDO} mkdir -p /tmp/wp-latest
-    ${SUDO} curl -fsSL --retry 3 -o /tmp/wp-latest/wordpress.zip "${WP_PACKAGE_URL}" \
+    ${SUDO} curl -fsSL --retry 2 --connect-timeout 15 --max-time 900 \
+        --speed-limit 1024 --speed-time 60 \
+        -o /tmp/wp-latest/wordpress.zip "${WP_PACKAGE_URL}" \
         || fail "Failed to download WordPress package from ${WP_PACKAGE_URL}."
     ${SUDO} unzip -q -o /tmp/wp-latest/wordpress.zip -d /tmp/wp-latest \
         || fail "Failed to extract WordPress zip package."
@@ -223,7 +235,7 @@ write_wp_config() {
 # ══════════════════════════════════════════════════════════
 install_core() {
     # Already installed?
-    if wp --path="$WP_DIR" core is-installed --allow-root >/dev/null 2>&1; then
+    if ${SUDO} wp --path="$WP_DIR" core is-installed --allow-root >/dev/null 2>&1; then
         log "WordPress is already installed (core is-installed)."
         return 0
     fi
@@ -252,7 +264,186 @@ install_core() {
 }
 
 # ══════════════════════════════════════════════════════════
-# 5) Nginx server block → php-fpm
+# 5) CDSI Atlas Application Password
+# ══════════════════════════════════════════════════════════
+read_atlas_credential() {
+    local key="$1"
+    [[ -f "$WP_ATLAS_PASS_FILE" ]] || return 0
+    ${SUDO} awk -v prefix="${key}:" \
+        'index($0, prefix) == 1 { print substr($0, length(prefix) + 1); exit }' \
+        "$WP_ATLAS_PASS_FILE" 2>/dev/null || true
+}
+
+write_atlas_credentials() {
+    local application_uuid="$1"
+    local application_password="$2"
+    local temp_file=""
+    local destination_temp=""
+    local credential_owner=""
+
+    credential_owner="$(id -u):$(id -g)"
+
+    if ! temp_file="$(mktemp)"; then
+        return 1
+    fi
+    if ! chmod 600 "$temp_file"; then
+        rm -f "$temp_file" || true
+        return 1
+    fi
+    if ! {
+        printf 'user:%s\n' "$WP_ADMIN_USER"
+        printf 'name:%s\n' "$WP_ATLAS_APP_NAME"
+        printf 'app_id:%s\n' "$WP_ATLAS_APP_ID"
+        printf 'uuid:%s\n' "$application_uuid"
+        printf 'pass:%s\n' "$application_password"
+    } > "$temp_file"; then
+        rm -f "$temp_file" || true
+        return 1
+    fi
+
+    if ! ${SUDO} mkdir -p "$PASS_DIR"; then
+        rm -f "$temp_file" || true
+        return 1
+    fi
+    if ! destination_temp="$(${SUDO} mktemp "${WP_ATLAS_PASS_FILE}.tmp.XXXXXX")"; then
+        rm -f "$temp_file" || true
+        return 1
+    fi
+    if ! ${SUDO} install -m 600 "$temp_file" "$destination_temp"; then
+        rm -f "$temp_file" || true
+        ${SUDO} rm -f "$destination_temp" || true
+        return 1
+    fi
+    if ! ${SUDO} chown "$credential_owner" "$destination_temp"; then
+        rm -f "$temp_file" || true
+        ${SUDO} rm -f "$destination_temp" || true
+        return 1
+    fi
+    if ! ${SUDO} mv -f -- "$destination_temp" "$WP_ATLAS_PASS_FILE"; then
+        rm -f "$temp_file" || true
+        ${SUDO} rm -f "$destination_temp" || true
+        return 1
+    fi
+
+    rm -f "$temp_file" || true
+    return 0
+}
+
+revoke_atlas_application_password() {
+    local application_uuid="$1"
+    [[ -n "$application_uuid" ]] || return 1
+    ${SUDO} wp --path="$WP_DIR" user application-password delete \
+        "$WP_ADMIN_USER" "$application_uuid" --allow-root >/dev/null 2>&1
+}
+
+ensure_atlas_application_password() {
+    local stored_user=""
+    local stored_name=""
+    local stored_app_id=""
+    local stored_uuid=""
+    local stored_password=""
+    local actual_uuid=""
+    local actual_name=""
+    local application_password=""
+    local application_password_valid=false
+    local uuid_output=""
+    local fallback_uuid=""
+    local -a matching_uuids=()
+
+    ${SUDO} wp --path="$WP_DIR" user get "$WP_ADMIN_USER" --field=ID --allow-root \
+        >/dev/null 2>&1 || fail "WordPress admin user '${WP_ADMIN_USER}' was not found."
+
+    if ! uuid_output="$(${SUDO} wp --path="$WP_DIR" user application-password list \
+        "$WP_ADMIN_USER" --app_id="$WP_ATLAS_APP_ID" --field=uuid \
+        --allow-root --no-color)"; then
+        fail "Failed to inspect existing WordPress Application Passwords."
+    fi
+    while IFS= read -r actual_uuid; do
+        [[ -n "$actual_uuid" ]] && matching_uuids+=("$actual_uuid")
+    done <<< "$uuid_output"
+
+    (( ${#matching_uuids[@]} <= 1 )) \
+        || fail "Multiple WordPress Application Passwords use the CDSI Atlas app_id. Refusing to choose or rotate automatically."
+
+    if (( ${#matching_uuids[@]} == 1 )); then
+        actual_uuid="${matching_uuids[0]}"
+        actual_name="$(${SUDO} wp --path="$WP_DIR" user application-password get \
+            "$WP_ADMIN_USER" "$actual_uuid" --field=name --allow-root 2>/dev/null || true)"
+        stored_user="$(read_atlas_credential user)"
+        stored_name="$(read_atlas_credential name)"
+        stored_app_id="$(read_atlas_credential app_id)"
+        stored_uuid="$(read_atlas_credential uuid)"
+        stored_password="$(read_atlas_credential pass)"
+
+        if [[ -z "$stored_password" || -z "$stored_uuid" ]]; then
+            fail "Application Password '${WP_ATLAS_APP_NAME}' already exists, but its plaintext credentials are missing from ${WP_ATLAS_PASS_FILE}. WordPress cannot recover them; explicitly rotate the credential, then re-run."
+        fi
+        if [[ "$actual_name" != "$WP_ATLAS_APP_NAME" \
+            || "$stored_user" != "$WP_ADMIN_USER" \
+            || "$stored_name" != "$WP_ATLAS_APP_NAME" \
+            || "$stored_app_id" != "$WP_ATLAS_APP_ID" \
+            || "$stored_uuid" != "$actual_uuid" ]]; then
+            fail "Stored CDSI Atlas credentials do not match the existing WordPress Application Password. Refusing to rotate it automatically."
+        fi
+
+        log "CDSI Atlas Application Password already exists; keeping stored credentials."
+        return 0
+    fi
+
+    if ${SUDO} wp --path="$WP_DIR" user application-password exists \
+        "$WP_ADMIN_USER" "$WP_ATLAS_APP_NAME" --allow-root >/dev/null 2>&1; then
+        fail "An Application Password named '${WP_ATLAS_APP_NAME}' already exists with a different app_id. Refusing to replace it automatically."
+    fi
+
+    log "Creating WordPress Application Password for ${WP_ATLAS_APP_NAME}..."
+    if ! application_password="$(${SUDO} wp --path="$WP_DIR" user application-password create \
+        "$WP_ADMIN_USER" "$WP_ATLAS_APP_NAME" --app-id="$WP_ATLAS_APP_ID" \
+        --porcelain --allow-root --no-color)"; then
+        fail "Failed to create the CDSI Atlas Application Password."
+    fi
+    if [[ "$application_password" =~ ^[A-Za-z0-9]{24}$ ]]; then
+        application_password_valid=true
+    fi
+
+    matching_uuids=()
+    if uuid_output="$(${SUDO} wp --path="$WP_DIR" user application-password list \
+        "$WP_ADMIN_USER" --app_id="$WP_ATLAS_APP_ID" --field=uuid \
+        --allow-root --no-color)"; then
+        while IFS= read -r actual_uuid; do
+            [[ -n "$actual_uuid" ]] && matching_uuids+=("$actual_uuid")
+        done <<< "$uuid_output"
+    fi
+    if (( ${#matching_uuids[@]} != 1 )); then
+        fallback_uuid="$(${SUDO} wp --path="$WP_DIR" user application-password list \
+            "$WP_ADMIN_USER" --name="$WP_ATLAS_APP_NAME" --field=uuid \
+            --allow-root 2>/dev/null | head -n1 || true)"
+        if [[ -n "$fallback_uuid" ]] \
+            && revoke_atlas_application_password "$fallback_uuid"; then
+            fail "The new CDSI Atlas Application Password could not be verified and was revoked."
+        fi
+        fail "The new CDSI Atlas Application Password could not be verified or revoked automatically. Revoke '${WP_ATLAS_APP_NAME}' manually before re-running."
+    fi
+    actual_uuid="${matching_uuids[0]}"
+
+    if [[ "$application_password_valid" != true ]]; then
+        if revoke_atlas_application_password "$actual_uuid"; then
+            fail "WordPress returned an invalid Application Password value; the new credential was revoked."
+        fi
+        fail "WordPress returned an invalid Application Password value, and UUID ${actual_uuid} could not be revoked automatically. Revoke it manually before re-running."
+    fi
+
+    if ! write_atlas_credentials "$actual_uuid" "$application_password"; then
+        if revoke_atlas_application_password "$actual_uuid"; then
+            fail "Failed to save CDSI Atlas credentials to ${WP_ATLAS_PASS_FILE}; the new Application Password was revoked."
+        fi
+        fail "Failed to save CDSI Atlas credentials, and the new Application Password could not be revoked automatically. Revoke UUID ${actual_uuid} manually."
+    fi
+
+    log_ok "CDSI Atlas Application Password saved to: ${WP_ATLAS_PASS_FILE} (mode 600)"
+}
+
+# ══════════════════════════════════════════════════════════
+# 6) Nginx server block → php-fpm
 # ══════════════════════════════════════════════════════════
 configure_nginx() {
     local phpver sock site_name conf_path enabled_path tmpl_file
@@ -302,7 +493,7 @@ configure_nginx() {
 
 # ── Align WordPress site URL with the configured WP_URL ──
 set_site_url() {
-    if wp --path="$WP_DIR" core is-installed --allow-root >/dev/null 2>&1; then
+    if ${SUDO} wp --path="$WP_DIR" core is-installed --allow-root >/dev/null 2>&1; then
         ${SUDO} wp --path="$WP_DIR" option update siteurl "$WP_URL" --allow-root 2>/dev/null || true
         ${SUDO} wp --path="$WP_DIR" option update home    "$WP_URL" --allow-root 2>/dev/null || true
         log_ok "WordPress site URL set to ${WP_URL}."
@@ -333,6 +524,10 @@ fix_ownership() {
     ${SUDO} chown -R www-data:www-data "$WP_DIR" 2>/dev/null || true
     ${SUDO} find "$WP_DIR" -type d -exec chmod 755 {} \; 2>/dev/null || true
     ${SUDO} find "$WP_DIR" -type f -exec chmod 644 {} \; 2>/dev/null || true
+    if [[ -f "${WP_DIR}/wp-config.php" ]]; then
+        ${SUDO} chmod 600 "${WP_DIR}/wp-config.php" \
+            || fail "Failed to secure ${WP_DIR}/wp-config.php."
+    fi
 }
 
 # ── Main ───────────────────────────────────────────────────
@@ -342,6 +537,7 @@ provision_php
 download_wordpress
 write_wp_config
 install_core
+ensure_atlas_application_password
 set_site_url
 configure_nginx
 fix_ownership
@@ -349,13 +545,22 @@ maybe_issue_cert
 
 # ── Summary ────────────────────────────────────────────────
 log_ok "WordPress installation complete."
-log "  Version:   $(wp --path="$WP_DIR" core version --allow-root 2>/dev/null || echo unknown)"
-log "  URL:       ${WP_URL}"
+FINAL_WP_URL="$(cdsi_resolve_wordpress_url "$WP_DIR" "$WP_DOMAIN" "$WP_URL")"
+log "  Version:   $(${SUDO} wp --path="$WP_DIR" core version --allow-root 2>/dev/null || echo unknown)"
+log "  URL:       ${FINAL_WP_URL}"
 [[ -n "${WP_DOMAIN:-}" ]] && log "  Domain:    ${WP_DOMAIN} (Certbot SSL attempted)"
 log "  Web root:  ${WP_DIR}"
 log "  DB:        ${DB_NAME} (user ${DB_USER})"
 log "  Admin:     ${WP_ADMIN_USER}"
 log "  WP pass:   ${WP_PASS_FILE} (mode 600)"
-log "  Login:     ${WP_URL}/wp-admin/"
+log "  Atlas:     ${WP_ATLAS_PASS_FILE} (mode 600)"
+log "  Login:     ${FINAL_WP_URL}/wp-admin/"
+
+# The full install prints this once in its final verification report. Standalone
+# and single-component runs print it here as their final step.
+if [[ "${CDSI_INSTALL_CONTEXT:-standalone}" != "all" ]]; then
+    cdsi_print_wordpress_access "$FINAL_WP_URL" "$WP_PASS_FILE" \
+        "$WP_ADMIN_USER" "$WP_ATLAS_PASS_FILE" "$WP_DOMAIN"
+fi
 
 exit 0
