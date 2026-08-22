@@ -1,8 +1,12 @@
-# CDSI
+<p align="center">
+  <img src="assets/brand/anchor-lockup.png" alt="CDSI Anchor：个人数字主权，从一个脚本开始。" width="720">
+</p>
 
-**Creator Digital Sovereignty Infrastructure**  
-**创作者数字主权基础设施**
-**从一个脚本开始**
+# CDSI Anchor
+
+**Creator Digital Sovereignty Infrastructure**<br>
+**创作者数字主权基础设施**<br>
+**个人数字主权，从一个脚本开始。**
 
 > **Your Domain. Your Content. Your Data. Your Audience.**  
 > **你的域名，你的内容，你的数据，你的用户关系。**

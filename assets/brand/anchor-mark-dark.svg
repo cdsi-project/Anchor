@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">CDSI Anchor, dark background variant</title>
+  <desc id="desc">An open single-line path terminating at a green digital origin.</desc>
+  <path
+    d="M214 88V42H42V214H128V160"
+    fill="none"
+    stroke="#F7F8F4"
+    stroke-width="28"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+  />
+  <rect x="110" y="110" width="36" height="36" fill="#46D27E" />
+</svg>
