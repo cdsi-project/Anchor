@@ -1,22 +1,36 @@
 # CDSI Phase 2 — Creator Asset Layer
 
-> Status: Draft v0.1  
+> Status: Future design draft v0.1; not active Anchor implementation
 > Target: Codex / Engineering Implementation  
 > Project: CDSI  
 > Phase: 2  
 > Core theme: Creator Digital Asset Ownership
 
+> **Repository status (2026-08-22):** Anchor remains in M0 installer
+> integration and hardening. The WordPress OpenWeb provisioning path is
+> implemented, but CDSI Core, server-side asset APIs, backup/restore, and this
+> asset layer are not implemented in this repository. Do not use the phase
+> number in this historical draft as the active roadmap or an immediate task;
+> the root [README](../README.md) and [AGENTS](../AGENTS.md) are authoritative.
+> Local asset discovery and cloud backup currently belong to CDSI Beacon.
+
 ---
 
 ## 1. Phase 2 Goal
 
-CDSI Phase 1 has completed the basic infrastructure path:
+This draft originally assumed that CDSI Phase 1 had completed the full
+infrastructure path:
 
 - GitHub repository exists
 - server initialization can run
 - Nginx / MySQL / PHP and related runtime dependencies can be installed
 - basic deployment workflow is functional
 - CDSI Anchor can provision a usable server environment
+
+Anchor now provisions the five-component WordPress OpenWeb path, but M0 still
+requires integration, recovery, upgrade, uninstall, and health-check hardening.
+The broader assumption in this draft must therefore be treated as a future
+activation gate, not as a completion claim.
 
 Phase 2 should stop expanding infrastructure horizontally.
 
@@ -1341,9 +1355,11 @@ When implementing this phase:
 
 ---
 
-# 33. Immediate Next Task
+# 33. Future Activation Gate
 
-Start with:
+Do not start this phase until the active Anchor roadmap explicitly moves beyond
+M0 and identifies which repository owns the server-side asset model. When that
+happens, start with:
 
 ```text
 Issue #1 — Creator Asset Specification v0.1
@@ -1365,6 +1381,6 @@ How are IDs generated?
 How are versions handled?
 ```
 
-Once the specification and schema are stable enough, implement the Content Vault and validator.
+Once the specification and schema are stable enough, implement the Content Vault and validator in the repository selected by that roadmap decision.
 
 The specification must drive the code, not the other way around.

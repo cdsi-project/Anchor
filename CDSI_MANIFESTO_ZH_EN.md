@@ -501,17 +501,21 @@ CDSI 从基础设施开始。
 ```text
 一台干净 Ubuntu Server
         ↓
-CDSI Installer
+CDSI Anchor
         ↓
 Nginx
-PHP
+PHP-FPM
 MySQL
-Redis
-Supervisor
-HTTPS
+WordPress OpenWeb
+HTTPS（域名与 DNS 就绪时）
+Beacon Application Password
         ↓
 CDSI Node
 ```
+
+当前 Anchor Installer v0.3.0 已实现这条五组件主流程。Redis 与 Supervisor
+脚本仍可独立运行，但暂不属于默认安装；CDSI Core、`cdsi` CLI/doctor 和完整
+服务器恢复仍是后续工作。
 
 基础设施可以复杂。
 
@@ -1118,17 +1122,22 @@ The goal:
 ```text
 Clean Ubuntu Server
         ↓
-CDSI Installer
+CDSI Anchor
         ↓
 Nginx
-PHP
+PHP-FPM
 MySQL
-Redis
-Supervisor
-HTTPS
+WordPress OpenWeb
+HTTPS (when domain and DNS are ready)
+Beacon Application Password
         ↓
 CDSI Node
 ```
+
+Anchor Installer v0.3.0 implements this five-component primary path. Redis and
+Supervisor remain independently runnable scripts but are not part of the
+default installation. CDSI Core, the `cdsi` CLI/doctor, and complete server
+recovery remain future work.
 
 Infrastructure complexity should exist underneath.
 

@@ -34,6 +34,8 @@ CDSI 的核心原则是：
 
 > **完整的安装步骤、菜单说明、域名/SSL 配置、常见问题排错，请阅读 [使用说明/INSTALL](INSTALL.md)。**
 
+Anchor 的产品定位、当前边界和已知限制见 [CDSI-Anchor](CDSI-Anchor.md)。
+
 ---
 
 CDSI is an open-source infrastructure project for creators who want to own and control their digital identity, content, data, and audience relationships.
@@ -213,47 +215,51 @@ A creator should eventually be able to migrate away from CDSI without losing the
 
 ## Current Status
 
-CDSI is currently in **M0 — Node Anchor**.
+CDSI Anchor is currently in **M0 integration and hardening**. The installer
+version is **0.3.0**.
 
-The first engineering milestone is deliberately narrow:
+The primary path now provisions a WordPress OpenWeb node on a supported Ubuntu
+Server:
 
-> **From a clean Ubuntu Server to a working HTTPS-accessible CDSI Node through automated installation.**
+| Status | Scope |
+| --- | --- |
+| Implemented in `install.sh` | Preflight, Nginx, MySQL, PHP-FPM, Certbot, WordPress, final service/access report, and component uninstall |
+| Implemented support | System-default APT sources, bounded DPKG-lock retry, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
+| Standalone only | Redis and Supervisor scripts remain available, but are hidden from the main menu and Install All flow |
+| Planned | Composer/CDSI Core deployment, the `cdsi` CLI, `cdsi doctor`, resume/update workflows, and complete server backup/restore |
 
-Current M0 stack:
+The supported fresh-install runtime is deliberately narrow:
 
 ```text
-OS           Ubuntu Server LTS
-Web          Nginx
-Runtime      PHP-FPM
-Package      Composer
+OS           Ubuntu Server 24.04 LTS or 26.04 LTS
+Web          Nginx from the system default APT source
+Runtime      PHP-FPM from the system default APT source
 Database     MySQL
-Cache        Redis
-Process      Supervisor
-SSL          Let's Encrypt / Certbot
-Application  CDSI Core
+SSL          Let's Encrypt / Certbot when a valid domain is available
+OpenWeb      WordPress
+Integration  CDSI Beacon WordPress Application Password
 ```
 
 ### Current Priority
 
 The project is currently focused on:
 
-- installer skeleton
-- system preflight checks
-- logging
-- error handling
-- Nginx installation
-- PHP runtime
-- MySQL initialization
-- Redis
-- Supervisor
-- domain configuration
-- HTTPS
-- CDSI health checks
+- clean-server regression testing on both supported Ubuntu releases
+- safe reruns after partial installation
+- DNS, certificate, package-lock, and network failure recovery
+- uninstall safety and upgrade compatibility
+- replacing the placeholder health check with real end-to-end validation
 
 ### Not Yet the Focus
 
-The following are planned for later phases and should not be considered implemented yet:
+The following are planned and should not be considered implemented by Anchor:
 
+- CDSI Core application deployment
+- Composer management
+- `cdsi install`, `cdsi status`, `cdsi doctor`, and `cdsi update`
+- server-side CDSI API/data synchronization
+- complete automated server backup and restore
+- Redis or Supervisor in the default installation flow
 - article management
 - video asset management
 - podcast publishing
@@ -268,17 +274,18 @@ The following are planned for later phases and should not be considered implemen
 
 ---
 
-## Target Installation Experience
+## Installation Experience
 
-The target experience is:
+The current entry point is:
 
 ```bash
-git clone <CDSI_REPOSITORY>
+git clone https://github.com/cdsi-project/Anchor.git
 cd Anchor
 sudo ./install.sh
 ```
 
-And eventually:
+The installer presents a component menu and can install all five visible
+components in dependency order. The future CLI remains planned:
 
 ```bash
 cdsi install
@@ -287,7 +294,7 @@ cdsi doctor
 cdsi update
 ```
 
-The goal is to reduce infrastructure complexity so that owning an independent digital node does not require deep knowledge of Linux, Nginx, PHP, MySQL, Redis, SSL, Supervisor, queues, or deployment.
+The goal is to reduce infrastructure complexity so that owning an independent digital node does not require deep knowledge of Linux, Nginx, PHP, MySQL, SSL, or deployment.
 
 > The infrastructure should be complex underneath, but simple for the creator.
 
@@ -305,55 +312,65 @@ Each script under `scripts/` can also be run independently for focused operation
 bash scripts/check-env.sh
 sudo bash scripts/configure.sh
 bash scripts/health.sh
+sudo bash scripts/install-nginx.sh
+sudo bash scripts/install-mysql.sh
 sudo bash scripts/install-php.sh
+sudo bash scripts/install-certbot.sh
+sudo bash scripts/install-wordpress.sh
 ```
 
-Scripts that belong to a later milestone keep their current placeholder behavior until that milestone is implemented.
+`check-env.sh` is the active preflight implementation. `configure.sh` is a
+standalone `/etc/cdsi` configuration helper that is not yet called by the main
+install flow. `health.sh` remains a visible placeholder for the future
+`cdsi doctor` workflow.
 
 The PHP installer uses the default PHP packages from the supported Ubuntu
 repositories. It does not add a third-party PHP PPA or replace an existing
-global PHP alternative. Redis, GD, and OPcache are required extensions;
-Imagick is installed when an Ubuntu package is available.
+global PHP alternative. On a fresh supported installation it provisions Redis,
+GD, and OPcache extensions; Imagick is installed when an Ubuntu package is
+available. The fast path for a pre-existing PHP installation currently verifies
+PHP-FPM and `mysqli`, so administrators should verify any additional extensions
+needed by their site.
 
 ---
 
-## Repository Direction
+## Repository Structure
 
-Expected repository structure:
+Current structure:
 
 ```text
-cdsi/
+Anchor/
 ├── AGENTS.md
 ├── README.md
-├── PROJECT.md
-├── ROADMAP.md
-│
-├── installer/
-│   ├── install.sh
-│   ├── lib/
-│   ├── modules/
-│   ├── templates/
-│   └── checks/
-│
-├── bin/
-│   └── cdsi
-│
+├── INSTALL.md
+├── CDSI-Anchor.md
+├── CDSI_MANIFESTO_ZH_EN.md
+├── install.sh
+├── uninstall.sh
+├── SHA256SUMS
+├── config/
+├── lib/
+├── scripts/
+├── templates/
+├── tests/
 ├── docs/
-│   └── milestones/
-│       └── M0_NODE_ANCHOR.md
-│
-└── application source...
+└── password/             # generated locally and ignored by Git
 ```
 
-`AGENTS.md` defines engineering rules for coding agents.
-
-`docs/milestones/` contains implementation plans for specific milestones.
+`install.sh` is the orchestration entry point. Scripts under `scripts/` must
+remain independently runnable and communicate success or failure through their
+exit code. `AGENTS.md` defines repository engineering rules; older documents
+under `docs/` are retained as design history and are labeled accordingly.
 
 ---
 
 ## Roadmap
 
 ### M0 — Node Anchor
+
+**In progress.** The five-component WordPress OpenWeb installation path is
+implemented. Current work is integration testing, failure recovery, upgrade and
+uninstall safety, and real health checks.
 
 Goal:
 
@@ -504,18 +521,12 @@ CDSI should prefer the latter.
 
 ## License
 
-CDSI is intended to be developed as an open-source project.
-
-The final open-source license will be defined before the first public release.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 ---
 
 ## Status
 
-**Early-stage / M0 — Node Anchor**
+**M0 integration and hardening / Anchor Installer v0.3.0**
 
 CDSI is under active development and is not yet ready for production use.
-
-## License
-
-Licensed under the Apache License, Version 2.0.

@@ -3,6 +3,20 @@
 > **CDSI — Creator Digital Sovereignty Infrastructure**  
 > 本文档用于指导 Codex 实现 CDSI 的第一个工程里程碑：**从一台裸 Ubuntu Server 自动化部署出一个 HTTPS 可访问的 CDSI Node**。
 
+> **文档状态（2026-08-22）：历史设计与进度记录。** 本文保留最初的
+> Installer v0.1 目标、示例路径和未勾选清单，不代表当前实现状态。
+> 当前事实以根目录 [README](../README.md)、[INSTALL](../INSTALL.md) 和
+> [AGENTS](../AGENTS.md) 为准；当前入口是 `sudo ./install.sh`。
+
+当前 M0 / Installer v0.3.0 进度：
+
+| 状态 | 内容 |
+| --- | --- |
+| 已实现 | 安装器骨架、日志与预检、Nginx、MySQL、PHP-FPM、WordPress、域名、Certbot、组件级幂等、最终访问信息、Beacon Application Password、卸载、APT 锁重试、CDN SHA-256 校验 |
+| 独立可用 | Redis、Supervisor；不进入主菜单和“安装全部” |
+| 部分实现 | `/etc/cdsi` 配置助手、整机集成验收、持久日志与故障恢复 |
+| 未实现 | Composer/CDSI Core 部署、`cdsi` CLI/doctor/update、断点续装、完整服务器备份恢复、队列 Worker |
+
 ---
 
 ## 1. 目标
@@ -14,9 +28,9 @@ CDSI M0 只解决一个问题：
 最终目标体验：
 
 ```bash
-git clone <CDSI_REPOSITORY>
-cd cdsi
-sudo ./installer/install.sh
+git clone https://github.com/cdsi-project/Anchor.git
+cd Anchor
+sudo ./install.sh
 ```
 
 安装完成后：
@@ -1216,10 +1230,10 @@ Action
 ## Milestone 1 — Installer Skeleton
 
 ```text
-[ ] installer/install.sh
+[ ] install.sh
 [ ] lib/common.sh
 [ ] lib/logger.sh
-[ ] checks/preflight.sh
+[ ] scripts/check-env.sh
 [ ] 基础错误处理
 [ ] 安装状态输出
 ```
@@ -1377,8 +1391,8 @@ mysql -u root ...
 连续运行两次：
 
 ```bash
-sudo ./installer/install.sh
-sudo ./installer/install.sh
+sudo ./install.sh
+sudo ./install.sh
 ```
 
 第二次不得破坏第一次结果。
@@ -1467,43 +1481,16 @@ Codex 实现时遵循以下规则：
 
 ---
 
-# 31. 当前最高优先级
+# 31. 历史里程碑说明
 
-Codex **现在只实现 Milestone 1**：
+本文最初要求只实现 Installer Skeleton、Logger、Preflight 和 Error
+Handling；该里程碑已经完成，Nginx、PHP-FPM、MySQL、Certbot 和 WordPress
+主流程也已实现。不得再依据旧清单禁止这些组件或从不存在的
+旧版设想中的目录结构重新搭建工程。
 
-```text
-Installer Skeleton
-Logger
-Preflight
-Error Handling
-```
-
-第一步不要安装 Nginx / PHP / MySQL。
-
-先确保以下命令稳定：
-
-```bash
-sudo ./installer/install.sh
-```
-
-能够输出：
-
-```text
-CDSI Installer
-CDSI Preflight Check
-System information
-Existing services
-Port status
-Ready / Warning / Error
-```
-
-并生成：
-
-```text
-/var/log/cdsi/install.log
-```
-
-Milestone 1 通过后，再进入 Nginx / PHP / MySQL。
+当前最高优先级是对 `sudo ./install.sh` 进行干净服务器、重复执行、部分失败、
+DNS/证书降级、升级和卸载安全验证，并实现真实健康检查。新增功能前先查阅
+根目录文档中的当前状态。
 
 ---
 

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-# CDSI Agent Engineering Guide
+# CDSI Anchor Engineering Guide
 
 This file defines the engineering rules, project boundaries, and working conventions for AI coding agents working in the CDSI repository.
 
@@ -140,11 +140,24 @@ Infrastructure complexity should be pushed below the user-facing layer wherever 
 
 The project is currently in:
 
-# M0 — Node Anchor
+# M0 — Anchor Installer v0.3.0 Integration and Hardening
 
 Current priority:
 
-> From a clean Ubuntu Server to a working HTTPS-accessible CDSI Node through automated installation.
+> Make the implemented WordPress OpenWeb installation path reliable on clean
+> and partially configured supported Ubuntu servers.
+
+The current working baseline already includes:
+
+- preflight, logging, and component orchestration in `install.sh`
+- Nginx, MySQL, PHP-FPM, Certbot, and WordPress installation
+- system-default APT sources and bounded DPKG-lock retry
+- CDN SHA-256 verification
+- final site, WordPress administrator, and Beacon Application Password output
+- component and full uninstall workflows
+
+Redis and Supervisor remain independently runnable compatibility scripts, but
+they are intentionally hidden from the main menu and Install All flow.
 
 The current engineering focus is NOT yet:
 
@@ -165,18 +178,25 @@ Do not expand scope into these areas unless explicitly requested.
 
 # 4. Current M0 Architecture
 
-The initial supported deployment stack is:
+The implemented default deployment stack is:
 
 ```text
-OS           Ubuntu Server LTS
+OS           Ubuntu Server 24.04 LTS or 26.04 LTS
 Web          Nginx
 Runtime      PHP-FPM
-Package      Composer
 Database     MySQL
-Cache        Redis
-Process      Supervisor
 SSL          Let's Encrypt / Certbot
-Application  CDSI Core
+OpenWeb      WordPress
+Integration  CDSI Beacon WordPress Application Password
+```
+
+The following distinctions are mandatory when documenting or changing the
+repository:
+
+```text
+Default flow     Nginx, MySQL, PHP-FPM, Certbot, WordPress
+Standalone only  Redis, Supervisor
+Planned          Composer, CDSI Core deployment, cdsi CLI/doctor
 ```
 
 The first version intentionally supports a narrow deployment path.
@@ -208,41 +228,28 @@ Principle:
 
 The repository should maintain clear boundaries between:
 
-## CDSI Core
+## Anchor Installer
 
-Responsible for application/business logic.
-
-Examples:
-
-- creator identity
-- creator assets
-- articles
-- notes
-- videos
-- podcasts
-- projects
-- audience
-- distribution
-- data
-- action interfaces
-
-## Installer
-
-Responsible for infrastructure setup and application deployment.
+Responsible for server provisioning and the OpenWeb installation lifecycle.
 
 Examples:
 
 - operating system checks
-- Nginx
-- PHP
-- Composer
-- MySQL
-- Redis
-- Supervisor
-- Certbot
-- CDSI deployment
-- service configuration
-- health checks
+- Nginx, PHP-FPM, MySQL, Certbot, and WordPress installation
+- domain and service configuration
+- generated credentials and final access reporting
+- safe reruns, uninstall, and infrastructure verification
+
+## Installed WordPress OpenWeb Node
+
+WordPress owns content-management behavior after provisioning. Anchor may
+configure WordPress and create the Beacon Application Password, but installation
+scripts must not absorb CMS business logic.
+
+## Future CDSI Core
+
+Composer and CDSI Core deployment are planned, not current behavior. Do not
+claim or implement them as part of M0 without an explicit scope change.
 
 Do NOT put CDSI business logic into installation scripts.
 
@@ -250,72 +257,49 @@ Do NOT put CDSI business logic into installation scripts.
 
 # 6. Installer Structure
 
-Preferred structure:
+Current structure:
 
 ```text
-installer/
+Anchor/
 ├── install.sh
-│
+├── uninstall.sh
+├── SHA256SUMS
 ├── lib/
+│   ├── apt.sh
 │   ├── common.sh
 │   ├── logger.sh
 │   ├── system.sh
-│   ├── config.sh
-│   └── secrets.sh
-│
-├── modules/
-│   ├── nginx.sh
-│   ├── php.sh
-│   ├── mysql.sh
-│   ├── redis.sh
-│   ├── supervisor.sh
-│   ├── certbot.sh
-│   └── cdsi.sh
-│
+│   └── wordpress-access.sh
+├── scripts/
+│   ├── check-env.sh
+│   ├── configure.sh
+│   ├── health.sh
+│   └── install-*.sh
+├── config/
 ├── templates/
-│   ├── nginx.conf.tpl
-│   ├── supervisor-worker.conf.tpl
-│   └── env.tpl
-│
-└── checks/
-    ├── preflight.sh
-    └── health.sh
+├── tests/
+└── docs/
 ```
 
-CLI:
-
-```text
-bin/
-└── cdsi
-```
-
-Do NOT build one giant `install.sh`.
-
-Keep modules small and responsibility-focused.
+`install.sh` owns user interaction and orchestration. Component implementation
+belongs under `scripts/`; shared primitives belong under `lib/`. Keep both
+layers small and responsibility-focused.
 
 ---
 
-# 7. Module Convention
+# 7. Script Convention
 
-Infrastructure modules should preferably expose:
+Every script under `scripts/` must remain independently runnable. `install.sh`
+invokes component scripts as child processes and relies on their exit codes:
 
-```bash
-<module>_check
-<module>_install
-<module>_configure
-<module>_verify
+```text
+0        component completed or was safely skipped
+non-zero component failed; orchestration must report and stop as appropriate
 ```
 
-Example:
-
-```bash
-nginx_check
-nginx_install
-nginx_configure
-nginx_verify
-```
-
-Modules must inspect existing system state before making changes.
+Scripts may source shared functions from `lib/`, but must load the runtime they
+need when executed directly. Component scripts must inspect existing system
+state before making changes and verify the result they own.
 
 Never assume the server is always completely clean.
 
@@ -328,7 +312,7 @@ Installer operations MUST be designed to be idempotent wherever possible.
 Running:
 
 ```bash
-sudo ./installer/install.sh
+sudo ./install.sh
 ```
 
 twice must not destroy an existing CDSI installation.
@@ -339,8 +323,7 @@ Expected behavior:
 Nginx             Installed        SKIP
 PHP               Installed        SKIP
 MySQL Database    Exists           SKIP
-Redis             Running          SKIP
-CDSI              Installed        VERIFY
+WordPress         Installed        SKIP / VERIFY
 SSL               Valid            SKIP
 ```
 
@@ -529,10 +512,15 @@ At minimum inspect:
 - existing Nginx
 - existing PHP
 - existing MySQL
-- existing Redis
-- existing Supervisor
+- existing Redis/Supervisor when present as legacy or standalone components
 
 Do not modify the server before critical compatibility checks pass.
+
+The active preflight is `scripts/check-env.sh` and rejects Ubuntu releases other
+than 24.04/26.04. Nginx and PHP also repeat that guard when run independently.
+MySQL, Certbot, and WordPress standalone scripts currently assume the caller is
+already on a supported Ubuntu host; keep that limitation explicit until the
+guard is shared by every component.
 
 ---
 
@@ -554,7 +542,10 @@ Sensitive values should be separated when appropriate:
 /etc/cdsi/secrets.env
 ```
 
-The application `.env` should be generated or updated deliberately and safely.
+`scripts/configure.sh` currently provides the standalone `/etc/cdsi`
+configuration helper; it is not part of the main WordPress installation flow.
+Future application configuration such as `.env` must be generated or updated
+deliberately and safely.
 
 Existing configuration must not be destroyed without explicit reason.
 
@@ -562,7 +553,7 @@ Existing configuration must not be destroyed without explicit reason.
 
 # 15. Database Rules
 
-CDSI application code must use a dedicated MySQL account.
+The installed WordPress site must use a dedicated MySQL account.
 
 Never use:
 
@@ -577,11 +568,11 @@ Installer responsibilities:
 ```text
 install MySQL
 create database
-create CDSI user
+create dedicated application user
 generate password
 grant minimum required privileges
-write configuration
-verify application connection
+write WordPress configuration
+verify WordPress/database connectivity
 ```
 
 Verification must test actual application/database connectivity where possible.
@@ -618,26 +609,21 @@ Use templates where practical.
 
 # 17. PHP Rules
 
-PHP installation must follow CDSI Core's actual dependency requirements.
+Use the metapackages available from the supported Ubuntu system repositories.
+Do not add third-party PHP PPAs, force a global PHP alternative, or assume a
+versioned package exists without resolving the system default PHP version.
 
-Do not blindly trust this document if the project's Composer requirements differ.
-
-Inspect:
-
-```text
-composer.json
-composer.lock
-```
-
-before deciding required PHP versions/extensions.
-
-The repository itself is the source of truth for application dependencies.
+The fresh-install path requires the extensions used by WordPress and Beacon's
+OpenWeb workflow, including `mysqli`, cURL, XML, mbstring, ZIP, GD, Redis, and
+OPcache. Imagick is optional when the system repository does not provide it.
+Checks for an existing PHP installation must not claim extensions were installed
+unless they were actually verified.
 
 ---
 
 # 18. CDSI CLI
 
-The long-term operational entry point is:
+The `cdsi` CLI is not implemented. The long-term operational entry point is:
 
 ```bash
 cdsi
@@ -670,7 +656,8 @@ Do not implement future commands prematurely unless explicitly requested.
 
 # 19. Health Checks
 
-`cdsi doctor` should eventually validate three levels.
+`scripts/health.sh` is currently a placeholder. A future `cdsi doctor` should
+validate three levels.
 
 ## Infrastructure
 
@@ -678,9 +665,8 @@ Do not implement future commands prematurely unless explicitly requested.
 Nginx
 PHP-FPM
 MySQL
-Redis
-Supervisor
-Queue
+WordPress
+Redis/Supervisor when explicitly installed
 ```
 
 ## Application
@@ -690,7 +676,7 @@ Application boot
 Database connectivity
 Storage
 Configuration
-Queue
+Beacon Application Password presence (never print the secret)
 ```
 
 ## Network
@@ -723,7 +709,7 @@ CDSI Installer
         ↓
 Infrastructure configuration
         ↓
-CDSI Core
+WordPress OpenWeb node
         ↓
 Domain
         ↓
@@ -742,61 +728,54 @@ Important scenarios:
 6. Partial installation failure.
 7. Service unavailable.
 8. Incorrect configuration.
-9. `cdsi doctor`.
+9. Uninstall dry-run and confirmed uninstall.
+10. Future health/doctor behavior when implemented.
 
 ---
 
 # 21. Current Milestone
 
-## Milestone 1
+## M0 Integration and Hardening
 
-The current implementation priority is:
+The installer skeleton milestone is complete. The current implementation must
+be treated as an existing five-component product path, not as a plan to start
+over.
 
-```text
-Installer Skeleton
-Logger
-Preflight
-Error Handling
-```
-
-Unless the user explicitly changes the milestone, DO NOT jump ahead and implement the entire infrastructure stack.
-
-Milestone 1 should produce:
-
-```bash
-sudo ./installer/install.sh
-```
-
-with useful output such as:
+Implemented:
 
 ```text
-CDSI Installer
-
-CDSI Preflight Check
-────────────────────────
-
-OS              Ubuntu 24.04       OK
-Architecture    x86_64             OK
-Memory          3.8 GB             OK
-Disk            42 GB              OK
-Port 80         Available          OK
-Port 443        Available          OK
-
-Nginx           Not Installed
-PHP             Not Installed
-MySQL           Not Installed
-Redis           Not Installed
-
-Ready to install CDSI.
+Preflight and logging
+Nginx / MySQL / PHP-FPM / Certbot / WordPress
+Domain-aware HTTP/HTTPS setup
+System-default APT package installation with bounded lock retry
+Pinned SHA-256 verification for WP-CLI and WordPress downloads
+WordPress administrator and Beacon Application Password provisioning
+Final access report
+Component and full uninstall
 ```
 
-And create:
+Standalone but excluded from default orchestration:
 
 ```text
-/var/log/cdsi/install.log
+Redis
+Supervisor
 ```
 
-Do NOT install Nginx/PHP/MySQL as part of Milestone 1 unless explicitly requested.
+Not implemented:
+
+```text
+Composer and CDSI Core deployment
+cdsi CLI / doctor / update
+resume checkpoints
+complete server backup and restore
+automated fresh-server/reinstall/reboot integration coverage in this repository
+standalone platform-guard parity for MySQL, Certbot, and WordPress
+```
+
+Current work should prioritize clean-server regression testing, safe reruns,
+partial-failure recovery, DNS/certificate degradation, upgrade compatibility,
+uninstall safety, and real health checks. Do not expand into later CDSI product
+features unless explicitly requested.
 
 ---
 
@@ -894,6 +873,12 @@ php artisan db:wipe
 unless explicitly required and safe in the current context.
 
 Never destroy user data to make a test pass.
+
+`uninstall.sh` is package/path based and does not track provenance. Every
+single-component or full uninstall must be treated as a dedicated-server
+operation: preview the exact same target with `--dry-run`, disclose shared
+package/data/certificate impact, and never describe it as removing only packages
+that Anchor originally installed.
 
 ---
 

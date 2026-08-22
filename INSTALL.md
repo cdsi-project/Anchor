@@ -12,9 +12,11 @@
 | 权限 | root 或 sudo 用户 |
 | 内存 | ≥ 1 GB |
 | 端口 | 80（HTTP）、443（HTTPS）对公网开放 |
-| 依赖 | apt-get、systemctl、git |
+| 依赖 | apt-get、systemctl、git、curl、sha256sum |
 
-**域名（可选但推荐）**：需要一个指向服务器 IP 的域名（A 记录），用于 WordPress 站点 URL 和 Let's Encrypt SSL 证书。没有域名也能装，网站通过服务器 IP 访问（仅 HTTP）。
+**域名（可选但推荐）**：需要一个指向服务器 IP 的裸域名（A 记录，例如 `cdsi.example.com`，不要带协议、端口或路径），用于 WordPress 站点 URL 和 Let's Encrypt SSL 证书。没有域名也能装，网站通过服务器 IP 访问（仅 HTTP）。主安装器需要交互式终端；组件脚本可独立运行。
+
+Nginx 和 PHP 只使用 Ubuntu 系统默认 APT 源。安装器检测到 nginx.org、Ondrej PHP/Nginx PPA 等冲突源时会停止并提示先移除，不会静默改写服务器的软件源。
 
 ---
 
@@ -58,7 +60,7 @@ Preflight 通过后，按任意键进入主菜单：
 |------|------|
 | **1 安装服务** | 进入组件安装子菜单 |
 | **2 卸载服务** | 调用 `uninstall.sh`，可选全部卸载或单项卸载 |
-| **3 查看密码** | 显示已安装组件的密码（MySQL/Redis/WordPress），按任意键返回 |
+| **3 查看密码** | 显示已安装组件的密码（MySQL/WordPress，以及独立安装时的 Redis），按任意键返回 |
 | **q 退出** | 退出安装器 |
 
 ### 3.2 组件安装菜单
@@ -83,20 +85,20 @@ Preflight 通过后，按任意键进入主菜单：
   5. WordPress    (WordPress站点)
 ```
 
-- **选 0**：按依赖顺序安装全部 5 个可见组件，完成后自动输出验收报告并退出。
-- **选 1-5**：单独安装某个组件（已安装的会自动跳过，幂等）。
+- **选 0**：按实际依赖顺序安装全部 5 个可见组件，完成后自动输出验收报告并退出。内部会先创建 WordPress/Nginx 站点块，再执行最终 Certbot 步骤；证书失败时保留 HTTP 站点并在摘要中标记。
+- **选 1-5**：单独运行某个组件。脚本会检查并复用现有状态，必要时继续协调配置，而不是一律整项跳过。
 
 ### 3.3 五个可见组件说明
 
-| # | 组件 | 作用 | 幂等跳过条件 |
-|---|------|------|-------------|
-| 1 | Nginx | Web 服务器，反向代理 PHP-FPM | nginx 已装 + active + `nginx -t` 有效 |
-| 2 | MySQL | 数据库，存储 WordPress 数据 | mysql 服务 active |
-| 3 | PHP-FPM | PHP 运行时，执行 WordPress | php + php-fpm 二进制存在 + mysqli 已加载 |
-| 4 | Certbot | Let's Encrypt SSL 证书自动签发与续期 | 证书已存在则跳过签发 |
-| 5 | WordPress | 站点应用，配置 Nginx + 安装 WP + 签 SSL | WP 已装（core is-installed） |
+| # | 组件 | 作用 | 重跑行为 |
+|---|------|------|----------|
+| 1 | Nginx | Web 服务器，反向代理 PHP-FPM | 复用已运行且配置有效的 Nginx，并重新协调全局 tuning |
+| 2 | MySQL | 数据库，存储 WordPress 数据 | 仅在 root/cdsi 凭据完整且 root 认证成功时快速复用；否则继续修复配置 |
+| 3 | PHP-FPM | PHP 运行时，执行 WordPress | PHP-FPM 运行且 `mysqli` 已加载时快速复用；全新安装会补齐所需扩展 |
+| 4 | Certbot | Let's Encrypt SSL 证书自动签发与续期 | 无域名时只安装；已有证书时复用并重新协调 Nginx SSL 配置 |
+| 5 | WordPress | 站点应用，配置 Nginx + 安装 WP + 签 SSL | 已安装 core 仍会协调 URL、权限、Nginx 和 Beacon Application Password；单独运行时尝试 SSL |
 
-**推荐安装顺序**：选 0（全部安装），安装器会按正确依赖顺序执行。单独安装时请按 1→2→3→4→5 的顺序。
+**推荐方式**：选 0，由安装器内部按 Nginx → MySQL → PHP-FPM → WordPress → Certbot 执行。单独安装时先按 1→2→3→5；WordPress 会在域名站点块创建后尝试 Certbot，DNS 尚未就绪时可修复后再选 4。
 
 ---
 
@@ -116,16 +118,16 @@ sudo ./install.sh
 
 - 安装 Certbot 组件时，自动通过 Let's Encrypt ACME HTTP-01 验证签发免费 SSL 证书。
 - **前提**：域名 DNS A 记录已指向服务器 IP，且 80 端口对公网可达。
-- 签发后自动配置 Nginx 80→443 重定向，并启用 `certbot.timer` 自动续期。
+- 签发后自动配置 Nginx 80→443 重定向。存在 `certbot.timer` 时启用 systemd 定时续期，否则保留 Certbot 包提供的 cron 续期机制。
 - 证书邮箱默认 `admin@<域名>`（如 `admin@cdsi.example.com`），想用其他邮箱可覆盖：
 
 ```bash
 sudo CDSI_CERT_EMAIL=you@example.com ./install.sh
 ```
 
-### 4.3 SSL 速率限制
+### 4.3 SSL 签发失败与速率限制
 
-Let's Encrypt 对同一域名 168 小时（7 天）内最多签发 5 张证书。如果反复重装触发限制：
+Let's Encrypt 的签发受 DNS、端口连通性及其当前速率限制约束。如果反复重装触发限制，安装器会输出类似信息：
 
 ```
 [FAIL] Let's Encrypt rate limit reached — certificate NOT issued.
@@ -133,7 +135,7 @@ Let's Encrypt 对同一域名 168 小时（7 天）内最多签发 5 张证书�
 [FAIL]   The site stays HTTP-only for now.
 ```
 
-这是正常降级行为——安装继续，网站先用 HTTP 跑。等冷却时间过后重跑：
+这是正常降级行为：安装继续，网站先用 HTTP 运行。修复 DNS/端口问题或等待错误信息中的重试时间后再运行：
 
 ```bash
 sudo bash scripts/install-certbot.sh
@@ -172,7 +174,7 @@ sudo bash scripts/install-certbot.sh
 | 文件 | 内容 |
 |------|------|
 | `password/mysql.pass` | MySQL root 密码 + cdsi 用户密码 |
-| `password/redis.pass` | Redis 密码 |
+| `password/redis.pass` | Redis 密码（仅独立安装 Redis 时存在） |
 | `password/wordpress.pass` | WordPress 管理员用户名 + 登录密码 |
 | `password/wordpress-beacon.pass` | CDSI Beacon 用户名 + WordPress Application Password |
 
@@ -190,13 +192,13 @@ sudo bash scripts/install-certbot.sh
 sudo bash scripts/install-nginx.sh
 sudo bash scripts/install-mysql.sh
 sudo bash scripts/install-php.sh
+sudo bash scripts/install-wordpress.sh
+sudo bash scripts/install-certbot.sh
 sudo bash scripts/install-redis.sh
 sudo bash scripts/install-supervisor.sh
-sudo bash scripts/install-certbot.sh
-sudo bash scripts/install-wordpress.sh
 ```
 
-每个脚本独立可用，幂等（已装则跳过）。
+每个脚本独立可用，并以幂等重跑为目标：已满足的步骤会复用，配置协调或缺失验证仍可能继续执行。
 
 所有安装脚本的 `apt-get` 操作都带有有界重试。遇到系统启动后的
 `unattended-upgrades`、`apt-daily` 等进程占用 DPKG 锁时，单次最多等待
@@ -222,12 +224,17 @@ sudo ./uninstall.sh
 菜单提供 7 项单项卸载 + 全部卸载。支持 `--dry-run`（预览不执行）和 `--yes`（跳过确认）：
 
 ```bash
-# 预览会卸载什么
-sudo ./uninstall.sh --dry-run
+# 预览全量或单组件会卸载什么
+sudo ./uninstall.sh --dry-run all
+sudo ./uninstall.sh --dry-run mysql
 
 # 全部卸载（不询问确认）
-sudo ./uninstall.sh --yes 0
+sudo ./uninstall.sh --yes all
 ```
+
+单项和全量卸载都是破坏性操作。卸载器没有安装来源清单，会按包名和固定路径处理服务器上的全局资源：例如 MySQL 卸载会删除整个 `/var/lib/mysql`，Certbot 卸载会处理 `/etc/letsencrypt` 中的全部证书，WordPress 卸载会删除全局 `/usr/local/bin/wp`，Nginx/PHP/Redis 也会按包名清理。它只适用于专用 CDSI 测试/节点服务器，不适合同时承载其他网站、数据库或共享运行时的混合服务器。
+
+先对准备执行的同一目标运行 `--dry-run` 并核对输出；`--yes` 只应在已备份且确认清理范围后使用。卸载会清理所选组件的密码文件，但保留仓库中的 `config/domain` 和独立配置助手创建的 `/etc/cdsi`，便于审计或重装。
 
 ---
 
@@ -248,7 +255,7 @@ sudo ./uninstall.sh --yes 0
 vim config/nginx-site.conf.template
 
 # 重新应用
-sudo ./install.sh   # 选 1 → 选 7（WordPress）
+sudo ./install.sh   # 选 1 → 选 5（WordPress）
 ```
 
 全局 Nginx 调优（gzip 类型、SSL session cache、server_tokens 等）由 `install-nginx.sh` 自动写入 `/etc/nginx/conf.d/cdsi-tuning.conf`。
@@ -297,9 +304,11 @@ Beacon 的“源站域名”配置只接受裸域名（例如 `cdsi.example.com`
 
 ```bash
 mysql -u root -p -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '新密码';"
-echo "root:新密码" > password/mysql.pass
-chmod 600 password/mysql.pass
+sudo sed -i 's/^root:.*/root:新密码/' password/mysql.pass
+sudo chmod 600 password/mysql.pass
 ```
+
+上面的 `sed` 只更新 `root:` 行，会保留同一文件中的 `cdsi:` 应用凭据。若密码包含会被 `sed` 解释的字符，请手动编辑该行并再次确认文件权限为 600。
 
 ---
 
@@ -321,9 +330,9 @@ Anchor/
 │   ├── install-supervisor.sh
 │   ├── install-certbot.sh
 │   ├── install-wordpress.sh
-│   ├── check-env.sh              # 环境检查（M1+）
-│   ├── configure.sh              # 配置（M1+）
-│   └── health.sh                 # 健康检查（M1+）
+│   ├── check-env.sh              # 当前安装器使用的环境预检
+│   ├── configure.sh              # 可独立运行，尚未接入主安装流程
+│   └── health.sh                 # 未来 doctor 的占位实现
 ├── lib/
 │   ├── apt.sh                    # apt-get 锁等待与有界重试
 │   ├── common.sh                 # 颜色、常量、工具函数
@@ -331,7 +340,10 @@ Anchor/
 │   ├── system.sh                 # 系统工具
 │   └── wordpress-access.sh       # WordPress / Beacon 最终访问信息
 ├── tests/
-│   └── test-apt.sh               # apt-get 重试单元测试
+│   ├── test-apt.sh               # apt-get 重试单元测试
+│   ├── test-install-order.sh     # 安装全部依赖顺序/Certbot 降级测试
+│   ├── test-preflight.sh         # Ubuntu 版本预检测试
+│   └── test-uninstall.sh         # 卸载 dry-run/数据库认证保护测试
 ├── password/                     # 密码文件（gitignored，安装时生成）
 │   ├── mysql.pass
 │   ├── redis.pass
