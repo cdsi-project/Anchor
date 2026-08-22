@@ -2,6 +2,7 @@
 
 **Creator Digital Sovereignty Infrastructure**  
 **创作者数字主权基础设施**
+**从一个脚本开始**
 
 > **Your Domain. Your Content. Your Data. Your Audience.**  
 > **你的域名，你的内容，你的数据，你的用户关系。**
