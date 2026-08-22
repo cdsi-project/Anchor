@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 # CDSI Anchor — Environment Check
 # Inspects the server before any installation begins.
-# M1 Core: this is the primary deliverable of Milestone 1.
+# Active preflight used by install.sh; it also remains independently runnable.
 # ═══════════════════════════════════════════════════════════════
 
 # Function definitions remain sourceable, while direct execution runs
@@ -85,9 +85,10 @@ pf_check_user() {
 }
 
 pf_check_os() {
-    local pretty status
+    local pretty version status
     pretty=$(get_os_pretty_name)
-    if check_os_ubuntu; then
+    version=$(get_os_version)
+    if check_os_ubuntu && [[ "$version" == "24.04" || "$version" == "26.04" ]]; then
         status="$PF_OK"
     else
         status="$PF_FAIL"

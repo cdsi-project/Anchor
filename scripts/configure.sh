@@ -3,7 +3,7 @@
 # CDSI Anchor — Configuration & Secrets
 # Manages /etc/cdsi/cdsi.conf and secrets.env.
 # Merged from former lib/config.sh + lib/secrets.sh.
-# M1: Framework only — actual usage begins in M2.
+# Standalone helper; the current WordPress install flow does not invoke it.
 # ═══════════════════════════════════════════════════════════════
 
 # Function definitions remain sourceable, while direct execution runs

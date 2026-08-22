@@ -31,7 +31,7 @@ source "${CDSI_ROOT}/lib/wordpress-access.sh"
 # code path and exit-status contract.
 
 # ── Installer Metadata ─────────────────────────────────────
-readonly CDSI_INSTALLER_VERSION="0.3.0"
+readonly CDSI_INSTALLER_VERSION="$CDSI_VERSION"
 readonly CDSI_COMPONENT_NOT_IMPLEMENTED=3
 readonly CDSI_PREFLIGHT_SCRIPT="${CDSI_ROOT}/scripts/check-env.sh"
 
@@ -160,12 +160,22 @@ cdsi_install_component() {
     fi
 }
 
-# Install all remaining components in order.
+# Install all remaining components in dependency order. The menu keeps Certbot
+# at option 4, but a clean server needs the WordPress Nginx site block first.
 cdsi_install_all() {
     local i
-    for i in "${!CDSI_COMP_NAMES[@]}"; do
+    local -a install_order=(0 1 2 4 3)
+    for i in "${install_order[@]}"; do
         if [[ "${CDSI_COMP_DONE[$i]}" != true && "${CDSI_COMP_UNAVAILABLE[$i]}" != true ]]; then
-            cdsi_install_component "$i" all
+            if [[ "$i" -eq 3 ]]; then
+                if ! cdsi_install_component "$i" all; then
+                    CDSI_CURRENT_STAGE="MENU"
+                    log_warning "Certbot is deferred; the WordPress site remains available over HTTP."
+                    log_warning "Fix DNS/port 80, then run: sudo bash scripts/install-certbot.sh"
+                fi
+            else
+                cdsi_install_component "$i" all
+            fi
         fi
     done
 }
@@ -397,7 +407,7 @@ cdsi_run_install_flow() {
                 cdsi_install_all
                 cdsi_summary
                 cdsi_post_install_report
-                log_success "全部服务安装完成，验收报告已输出。安装程序即将退出。"
+                log_info "安装流程已结束，验收报告已输出；请核对组件摘要与 HTTPS 状态。"
                 exit 0
                 ;;
             [1-9])
@@ -537,4 +547,6 @@ main() {
     log_success "CDSI Installer finished."
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

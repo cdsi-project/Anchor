@@ -657,14 +657,22 @@ ensure_beacon_application_password
 set_site_url
 configure_nginx
 fix_ownership
-maybe_issue_cert
+if [[ "${CDSI_INSTALL_CONTEXT:-standalone}" != "all" ]]; then
+    maybe_issue_cert
+fi
 
 # ── Summary ────────────────────────────────────────────────
 log_ok "WordPress installation complete."
 FINAL_WP_URL="$(cdsi_resolve_wordpress_url "$WP_DIR" "$WP_DOMAIN" "$WP_URL")"
 log "  Version:   $(${SUDO} wp --path="$WP_DIR" core version --allow-root 2>/dev/null || echo unknown)"
 log "  URL:       ${FINAL_WP_URL}"
-[[ -n "${WP_DOMAIN:-}" ]] && log "  Domain:    ${WP_DOMAIN} (Certbot SSL attempted)"
+if [[ -n "${WP_DOMAIN:-}" ]]; then
+    if [[ "${CDSI_INSTALL_CONTEXT:-standalone}" == "all" ]]; then
+        log "  Domain:    ${WP_DOMAIN} (Certbot SSL scheduled after WordPress)"
+    else
+        log "  Domain:    ${WP_DOMAIN} (Certbot SSL attempted)"
+    fi
+fi
 log "  Web root:  ${WP_DIR}"
 log "  DB:        ${DB_NAME} (user ${DB_USER})"
 log "  Admin:     ${WP_ADMIN_USER}"

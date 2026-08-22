@@ -61,7 +61,7 @@ for source_file in \
     /etc/apt/sources.list.d/*.list \
     /etc/apt/sources.list.d/*.sources; do
     [[ -f "$source_file" ]] || continue
-    if grep -qsE 'nginx\.org|ppa:(nginx|ondrej/nginx)' "$source_file"; then
+    if grep -qsE 'nginx\.org|ppa\.launchpad(content)?\.net/ondrej/nginx|ppa:(nginx|ondrej/nginx)' "$source_file"; then
         fail "Third-party Nginx source detected in ${source_file}. Remove it before continuing."
     fi
 done
