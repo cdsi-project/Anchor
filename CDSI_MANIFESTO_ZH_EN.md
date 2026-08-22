@@ -494,7 +494,7 @@ CDSI 从基础设施开始。
 
 因此第一个工程里程碑是：
 
-> **M0 — Node Bootstrap**
+> **M0 — Node Anchor**
 
 目标：
 
@@ -1111,7 +1111,7 @@ Before building articles, podcasts, memberships, AI features, or social protocol
 
 The first engineering milestone is therefore:
 
-**M0 — Node Bootstrap**
+**M0 — Node Anchor**
 
 The goal:
 

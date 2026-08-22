@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# CDSI Bootstrap — Nginx Installer
+# CDSI Anchor — Nginx Installer
 # Standalone script — can be called by install.sh or run directly:
 #   bash scripts/install-nginx.sh
 # ═══════════════════════════════════════════════════════════════

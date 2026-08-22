@@ -16,13 +16,13 @@ CDSI Phase 1 has completed the basic infrastructure path:
 - server initialization can run
 - Nginx / MySQL / PHP and related runtime dependencies can be installed
 - basic deployment workflow is functional
-- CDSI can bootstrap a usable server environment
+- CDSI Anchor can provision a usable server environment
 
 Phase 2 should stop expanding infrastructure horizontally.
 
 The next objective is to turn CDSI from:
 
-> an infrastructure bootstrap tool
+> an infrastructure provisioning tool
 
 into:
 
@@ -86,7 +86,7 @@ Phase 2 should implement five core capabilities:
 2. Content Vault
 3. Content Manifest
 4. Backup / Restore
-5. End-to-End Creator Site bootstrap
+5. End-to-End Creator Site provisioning
 
 Optional if time permits:
 

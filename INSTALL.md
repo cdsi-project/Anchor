@@ -24,8 +24,8 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/cdsi-project/cdsi-bootstrap.git
-cd cdsi-bootstrap
+git clone https://github.com/cdsi-project/Anchor.git
+cd Anchor
 
 # 2. 运行安装器（需要 root）
 sudo ./install.sh
@@ -160,10 +160,10 @@ sudo bash scripts/install-certbot.sh
   登录用户: cdsi
   登录密码: ********
 
-  CDSI Atlas OpenWeb 配置:
+  CDSI Beacon OpenWeb 配置:
   源站域名: cdsi.example.com
   登录用户: cdsi
-  应用名称: CDSI Atlas
+  应用名称: CDSI Beacon
   应用密码: ************************
 ```
 
@@ -174,7 +174,9 @@ sudo bash scripts/install-certbot.sh
 | `password/mysql.pass` | MySQL root 密码 + cdsi 用户密码 |
 | `password/redis.pass` | Redis 密码 |
 | `password/wordpress.pass` | WordPress 管理员用户名 + 登录密码 |
-| `password/wordpress-atlas.pass` | CDSI Atlas 用户名 + WordPress Application Password |
+| `password/wordpress-beacon.pass` | CDSI Beacon 用户名 + WordPress Application Password |
+
+从 Atlas 升级的节点仍可继续使用旧的 `password/wordpress-atlas.pass`；安装器会自动识别该文件，不会自动轮换已有 Application Password。
 
 随时通过主菜单「3 查看密码」查看。
 
@@ -209,7 +211,7 @@ WP-CLI 与 WordPress 安装包优先从国内 CDN 下载。所有来源下载的
 匹配仓库中的 `SHA256SUMS` 才会安装或解压；校验失败时会丢弃文件并尝试
 HTTPS 备用源。CDN 文件升级后，应先与可信来源交叉验证，再更新固定哈希。
 
-install-wordpress.sh 独立运行或从安装菜单单独执行完成后，也会在最后集中显示网站地址、后台地址、WordPress 登录用户、后台密码和 CDSI Atlas Application Password。密码通过终端直接显示，不写入持久安装日志。
+install-wordpress.sh 独立运行或从安装菜单单独执行完成后，也会在最后集中显示网站地址、后台地址、WordPress 登录用户、后台密码和 CDSI Beacon Application Password。密码通过终端直接显示，不写入持久安装日志。
 
 ### 6.2 卸载
 
@@ -279,15 +281,15 @@ cat password/wordpress.pass
 # 或安装器主菜单选 3
 ```
 
-CDSI Atlas 使用独立、可撤销的 WordPress Application Password：
+CDSI Beacon 使用独立、可撤销的 WordPress Application Password：
 
 ```bash
-cat password/wordpress-atlas.pass
+cat password/wordpress-beacon.pass
 ```
 
-Application Password 的明文只在创建时由 WordPress 返回。若 WordPress 中的 `CDSI Atlas` 记录仍存在、但该凭据文件丢失，安装器不会静默创建重复凭据；请先显式轮换该记录，再重新运行 WordPress 安装脚本。
+Application Password 的明文只在创建时由 WordPress 返回。若 WordPress 中的 `CDSI Beacon`（或升级前的 `CDSI Atlas`）记录仍存在、但该凭据文件丢失，安装器不会静默创建重复凭据；请先显式轮换该记录，再重新运行 WordPress 安装脚本。旧节点的 `password/wordpress-atlas.pass` 继续受支持。
 
-Atlas 的“源站域名”配置只接受裸域名（例如 `cdsi.example.com`），不要填写 `https://`、端口或路径。Atlas 固定通过 HTTPS 发布；IP 安装或证书尚未生效时，安装器会保存 Application Password，但会将 Atlas 标记为暂不可用。
+Beacon 的“源站域名”配置只接受裸域名（例如 `cdsi.example.com`），不要填写 `https://`、端口或路径。Beacon 固定通过 HTTPS 发布；IP 安装或证书尚未生效时，安装器会保存 Application Password，但会将 Beacon 标记为暂不可用。
 
 ### Q: 如何修改 MySQL root 密码？
 
@@ -304,7 +306,7 @@ chmod 600 password/mysql.pass
 ## 9. 文件结构
 
 ```
-cdsi-bootstrap/
+Anchor/
 ├── install.sh                    # 主安装器入口
 ├── uninstall.sh                  # 卸载器
 ├── SHA256SUMS                    # CDN 下载文件的固定 SHA-256
@@ -327,14 +329,14 @@ cdsi-bootstrap/
 │   ├── common.sh                 # 颜色、常量、工具函数
 │   ├── logger.sh                 # 日志
 │   ├── system.sh                 # 系统工具
-│   └── wordpress-access.sh       # WordPress / Atlas 最终访问信息
+│   └── wordpress-access.sh       # WordPress / Beacon 最终访问信息
 ├── tests/
 │   └── test-apt.sh               # apt-get 重试单元测试
 ├── password/                     # 密码文件（gitignored，安装时生成）
 │   ├── mysql.pass
 │   ├── redis.pass
 │   ├── wordpress.pass
-│   └── wordpress-atlas.pass
+│   └── wordpress-beacon.pass
 ├── templates/                    # 模板资源
 ├── docs/                         # 文档
 ├── AGENTS.md                     # AI Agent 工程契约
@@ -364,4 +366,4 @@ Certbot 日志：`/var/log/letsencrypt/letsencrypt.log`
 
 ## 下一步
 
-M0（Node Bootstrap）完成后，CDSI 将进入 M1（Creator Identity）阶段。详见 [README.md](README.md) 的 Roadmap 章节。
+M0（Node Anchor）完成后，CDSI 将进入 M1（Creator Identity）阶段。详见 [README.md](README.md) 的 Roadmap 章节。

@@ -43,29 +43,29 @@ cdsi_print_wordpress_access() {
     local site_url="${1%/}"
     local credentials_file="$2"
     local default_user="${3:-cdsi}"
-    local atlas_credentials_file="${4:-${credentials_file%/*}/wordpress-atlas.pass}"
-    local atlas_domain="${5:-}"
+    local beacon_credentials_file="${4:-${credentials_file%/*}/wordpress-beacon.pass}"
+    local beacon_domain="${5:-}"
     local username=""
     local password=""
-    local atlas_username=""
-    local atlas_name=""
-    local atlas_password=""
+    local beacon_username=""
+    local beacon_name=""
+    local beacon_password=""
     local admin_url=""
 
     if [[ -r "$credentials_file" ]]; then
         username="$(grep '^user:' "$credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
         password="$(grep '^pass:' "$credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
     fi
-    if [[ -r "$atlas_credentials_file" ]]; then
-        atlas_username="$(grep '^user:' "$atlas_credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
-        atlas_name="$(grep '^name:' "$atlas_credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
-        atlas_password="$(grep '^pass:' "$atlas_credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
+    if [[ -r "$beacon_credentials_file" ]]; then
+        beacon_username="$(grep '^user:' "$beacon_credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
+        beacon_name="$(grep '^name:' "$beacon_credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
+        beacon_password="$(grep '^pass:' "$beacon_credentials_file" 2>/dev/null | head -n1 | cut -d: -f2- || true)"
     fi
 
     [[ -n "$username" ]] || username="$default_user"
-    [[ -n "$atlas_username" ]] || atlas_username="$username"
-    [[ -n "$atlas_name" ]] || atlas_name="CDSI Atlas"
-    atlas_domain="$(printf '%s' "$atlas_domain" | awk -F'[, ]' '{print $1}')"
+    [[ -n "$beacon_username" ]] || beacon_username="$username"
+    [[ -n "$beacon_name" ]] || beacon_name="CDSI Beacon"
+    beacon_domain="$(printf '%s' "$beacon_domain" | awk -F'[, ]' '{print $1}')"
     if [[ -n "$site_url" ]]; then
         admin_url="${site_url}/wp-admin/"
     else
@@ -87,20 +87,20 @@ cdsi_print_wordpress_access() {
     fi
     printf '  凭据文件 / Credentials:  %s (mode 600)\n' "$credentials_file"
     printf '\n'
-    printf '  CDSI Atlas OpenWeb 配置 / Atlas Configuration\n'
-    if [[ -n "$atlas_domain" && "$site_url" == https://* ]]; then
-        printf '  源站域名 / Origin Domain: %s\n' "$atlas_domain"
+    printf '  CDSI Beacon OpenWeb 配置 / Beacon Configuration\n'
+    if [[ -n "$beacon_domain" && "$site_url" == https://* ]]; then
+        printf '  源站域名 / Origin Domain: %s\n' "$beacon_domain"
     else
         printf '  源站域名 / Origin Domain: <requires a domain with valid HTTPS>\n'
-        printf '  Atlas 状态 / Status:      暂不可用；请先配置域名和有效 HTTPS\n'
+        printf '  Beacon 状态 / Status:      暂不可用；请先配置域名和有效 HTTPS\n'
     fi
-    printf '  登录用户 / Username:     %s\n' "$atlas_username"
-    printf '  应用名称 / Application:  %s\n' "$atlas_name"
-    if [[ -n "$atlas_password" ]]; then
-        printf '  应用密码 / App Password: %s\n' "$atlas_password"
+    printf '  登录用户 / Username:     %s\n' "$beacon_username"
+    printf '  应用名称 / Application:  %s\n' "$beacon_name"
+    if [[ -n "$beacon_password" ]]; then
+        printf '  应用密码 / App Password: %s\n' "$beacon_password"
     else
-        printf '  应用密码 / App Password: <unavailable; see %s>\n' "$atlas_credentials_file"
+        printf '  应用密码 / App Password: <unavailable; see %s>\n' "$beacon_credentials_file"
     fi
-    printf '  Atlas 凭据 / Credentials: %s (mode 600)\n' "$atlas_credentials_file"
+    printf '  Beacon 凭据 / Credentials: %s (mode 600)\n' "$beacon_credentials_file"
     printf '  -------------------------------------------------------\n'
 }

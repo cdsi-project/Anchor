@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════
-# CDSI Bootstrap — WordPress Installer
+# CDSI Anchor — WordPress Installer
 # Downloads the latest WordPress, provisions it against the
 # existing `cdsi` MySQL database (credentials from password/mysql.pass),
 # and creates an admin user `cdsi` with a random 10-char password.
 # The admin username/password are saved to password/wordpress.pass. A separate
-# WordPress Application Password for CDSI Atlas is saved to
-# password/wordpress-atlas.pass so it can be revoked independently.
+# WordPress Application Password for CDSI Beacon is saved to
+# password/wordpress-beacon.pass so it can be revoked independently. Existing
+# password/wordpress-atlas.pass credentials remain supported after the rename.
 #
 # Also wires the LEMP stack so the site is reachable:
 #   • installs php-fpm + php-mysql + wp-cli if missing
@@ -49,7 +50,11 @@ source "${CDSI_ROOT}/lib/apt.sh"
 PASS_DIR="${CDSI_ROOT}/password"
 MYSQL_PASS_FILE="${PASS_DIR}/mysql.pass"
 WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
-WP_ATLAS_PASS_FILE="${PASS_DIR}/wordpress-atlas.pass"
+WP_BEACON_PASS_FILE="${PASS_DIR}/wordpress-beacon.pass"
+WP_LEGACY_ATLAS_PASS_FILE="${PASS_DIR}/wordpress-atlas.pass"
+if [[ ! -f "$WP_BEACON_PASS_FILE" && -f "$WP_LEGACY_ATLAS_PASS_FILE" ]]; then
+    WP_BEACON_PASS_FILE="$WP_LEGACY_ATLAS_PASS_FILE"
+fi
 CHECKSUM_FILE="${CDSI_ROOT}/SHA256SUMS"
 
 WEB_ROOT="/var/www"
@@ -81,9 +86,10 @@ fi
 WP_TITLE="CDSI Node"
 WP_ADMIN_USER="cdsi"
 WP_ADMIN_EMAIL="admin@cdsi.local"
-WP_ATLAS_APP_NAME="CDSI Atlas"
-# Stable UUIDv5 for the canonical CDSI Atlas application URL.
-WP_ATLAS_APP_ID="3549dd9a-23b7-5dbb-a9ef-78f9537c69ac"
+WP_BEACON_APP_NAME="CDSI Beacon"
+WP_LEGACY_ATLAS_APP_NAME="CDSI Atlas"
+# Keep the Atlas-era app_id so upgraded nodes reuse the existing credential.
+WP_BEACON_APP_ID="3549dd9a-23b7-5dbb-a9ef-78f9537c69ac"
 
 # ── Read cdsi DB password from password/mysql.pass ────────
 [[ -f "$MYSQL_PASS_FILE" ]] || fail "MySQL credential file not found: ${MYSQL_PASS_FILE}. Run install-mysql.sh first."
@@ -368,17 +374,17 @@ install_core() {
 }
 
 # ══════════════════════════════════════════════════════════
-# 5) CDSI Atlas Application Password
+# 5) CDSI Beacon Application Password
 # ══════════════════════════════════════════════════════════
-read_atlas_credential() {
+read_beacon_credential() {
     local key="$1"
-    [[ -f "$WP_ATLAS_PASS_FILE" ]] || return 0
+    [[ -f "$WP_BEACON_PASS_FILE" ]] || return 0
     ${SUDO} awk -v prefix="${key}:" \
         'index($0, prefix) == 1 { print substr($0, length(prefix) + 1); exit }' \
-        "$WP_ATLAS_PASS_FILE" 2>/dev/null || true
+        "$WP_BEACON_PASS_FILE" 2>/dev/null || true
 }
 
-write_atlas_credentials() {
+write_beacon_credentials() {
     local application_uuid="$1"
     local application_password="$2"
     local temp_file=""
@@ -396,8 +402,8 @@ write_atlas_credentials() {
     fi
     if ! {
         printf 'user:%s\n' "$WP_ADMIN_USER"
-        printf 'name:%s\n' "$WP_ATLAS_APP_NAME"
-        printf 'app_id:%s\n' "$WP_ATLAS_APP_ID"
+        printf 'name:%s\n' "$WP_BEACON_APP_NAME"
+        printf 'app_id:%s\n' "$WP_BEACON_APP_ID"
         printf 'uuid:%s\n' "$application_uuid"
         printf 'pass:%s\n' "$application_password"
     } > "$temp_file"; then
@@ -409,7 +415,7 @@ write_atlas_credentials() {
         rm -f "$temp_file" || true
         return 1
     fi
-    if ! destination_temp="$(${SUDO} mktemp "${WP_ATLAS_PASS_FILE}.tmp.XXXXXX")"; then
+    if ! destination_temp="$(${SUDO} mktemp "${WP_BEACON_PASS_FILE}.tmp.XXXXXX")"; then
         rm -f "$temp_file" || true
         return 1
     fi
@@ -423,7 +429,7 @@ write_atlas_credentials() {
         ${SUDO} rm -f "$destination_temp" || true
         return 1
     fi
-    if ! ${SUDO} mv -f -- "$destination_temp" "$WP_ATLAS_PASS_FILE"; then
+    if ! ${SUDO} mv -f -- "$destination_temp" "$WP_BEACON_PASS_FILE"; then
         rm -f "$temp_file" || true
         ${SUDO} rm -f "$destination_temp" || true
         return 1
@@ -433,14 +439,18 @@ write_atlas_credentials() {
     return 0
 }
 
-revoke_atlas_application_password() {
+revoke_beacon_application_password() {
     local application_uuid="$1"
     [[ -n "$application_uuid" ]] || return 1
     ${SUDO} wp --path="$WP_DIR" user application-password delete \
         "$WP_ADMIN_USER" "$application_uuid" --allow-root >/dev/null 2>&1
 }
 
-ensure_atlas_application_password() {
+is_supported_beacon_app_name() {
+    [[ "$1" == "$WP_BEACON_APP_NAME" || "$1" == "$WP_LEGACY_ATLAS_APP_NAME" ]]
+}
+
+ensure_beacon_application_password() {
     local stored_user=""
     local stored_name=""
     local stored_app_id=""
@@ -458,7 +468,7 @@ ensure_atlas_application_password() {
         >/dev/null 2>&1 || fail "WordPress admin user '${WP_ADMIN_USER}' was not found."
 
     if ! uuid_output="$(${SUDO} wp --path="$WP_DIR" user application-password list \
-        "$WP_ADMIN_USER" --app_id="$WP_ATLAS_APP_ID" --field=uuid \
+        "$WP_ADMIN_USER" --app_id="$WP_BEACON_APP_ID" --field=uuid \
         --allow-root --no-color)"; then
         fail "Failed to inspect existing WordPress Application Passwords."
     fi
@@ -467,43 +477,45 @@ ensure_atlas_application_password() {
     done <<< "$uuid_output"
 
     (( ${#matching_uuids[@]} <= 1 )) \
-        || fail "Multiple WordPress Application Passwords use the CDSI Atlas app_id. Refusing to choose or rotate automatically."
+        || fail "Multiple WordPress Application Passwords use the CDSI Beacon app_id. Refusing to choose or rotate automatically."
 
     if (( ${#matching_uuids[@]} == 1 )); then
         actual_uuid="${matching_uuids[0]}"
         actual_name="$(${SUDO} wp --path="$WP_DIR" user application-password get \
             "$WP_ADMIN_USER" "$actual_uuid" --field=name --allow-root 2>/dev/null || true)"
-        stored_user="$(read_atlas_credential user)"
-        stored_name="$(read_atlas_credential name)"
-        stored_app_id="$(read_atlas_credential app_id)"
-        stored_uuid="$(read_atlas_credential uuid)"
-        stored_password="$(read_atlas_credential pass)"
+        stored_user="$(read_beacon_credential user)"
+        stored_name="$(read_beacon_credential name)"
+        stored_app_id="$(read_beacon_credential app_id)"
+        stored_uuid="$(read_beacon_credential uuid)"
+        stored_password="$(read_beacon_credential pass)"
 
         if [[ -z "$stored_password" || -z "$stored_uuid" ]]; then
-            fail "Application Password '${WP_ATLAS_APP_NAME}' already exists, but its plaintext credentials are missing from ${WP_ATLAS_PASS_FILE}. WordPress cannot recover them; explicitly rotate the credential, then re-run."
+            fail "Application Password '${actual_name:-$WP_BEACON_APP_NAME}' already exists, but its plaintext credentials are missing from ${WP_BEACON_PASS_FILE}. WordPress cannot recover them; explicitly rotate the credential, then re-run."
         fi
-        if [[ "$actual_name" != "$WP_ATLAS_APP_NAME" \
-            || "$stored_user" != "$WP_ADMIN_USER" \
-            || "$stored_name" != "$WP_ATLAS_APP_NAME" \
-            || "$stored_app_id" != "$WP_ATLAS_APP_ID" \
-            || "$stored_uuid" != "$actual_uuid" ]]; then
-            fail "Stored CDSI Atlas credentials do not match the existing WordPress Application Password. Refusing to rotate it automatically."
+        if ! is_supported_beacon_app_name "$actual_name" \
+            || ! is_supported_beacon_app_name "$stored_name" \
+            || [[ "$stored_user" != "$WP_ADMIN_USER" \
+                || "$stored_app_id" != "$WP_BEACON_APP_ID" \
+                || "$stored_uuid" != "$actual_uuid" ]]; then
+            fail "Stored CDSI Beacon credentials do not match the existing WordPress Application Password. Refusing to rotate it automatically."
         fi
 
-        log "CDSI Atlas Application Password already exists; keeping stored credentials."
+        log "CDSI Beacon Application Password already exists; keeping stored credentials."
         return 0
     fi
 
     if ${SUDO} wp --path="$WP_DIR" user application-password exists \
-        "$WP_ADMIN_USER" "$WP_ATLAS_APP_NAME" --allow-root >/dev/null 2>&1; then
-        fail "An Application Password named '${WP_ATLAS_APP_NAME}' already exists with a different app_id. Refusing to replace it automatically."
+        "$WP_ADMIN_USER" "$WP_BEACON_APP_NAME" --allow-root >/dev/null 2>&1 \
+        || ${SUDO} wp --path="$WP_DIR" user application-password exists \
+            "$WP_ADMIN_USER" "$WP_LEGACY_ATLAS_APP_NAME" --allow-root >/dev/null 2>&1; then
+        fail "A Beacon or legacy Atlas Application Password already exists with a different app_id. Refusing to replace it automatically."
     fi
 
-    log "Creating WordPress Application Password for ${WP_ATLAS_APP_NAME}..."
+    log "Creating WordPress Application Password for ${WP_BEACON_APP_NAME}..."
     if ! application_password="$(${SUDO} wp --path="$WP_DIR" user application-password create \
-        "$WP_ADMIN_USER" "$WP_ATLAS_APP_NAME" --app-id="$WP_ATLAS_APP_ID" \
+        "$WP_ADMIN_USER" "$WP_BEACON_APP_NAME" --app-id="$WP_BEACON_APP_ID" \
         --porcelain --allow-root --no-color)"; then
-        fail "Failed to create the CDSI Atlas Application Password."
+        fail "Failed to create the CDSI Beacon Application Password."
     fi
     if [[ "$application_password" =~ ^[A-Za-z0-9]{24}$ ]]; then
         application_password_valid=true
@@ -511,7 +523,7 @@ ensure_atlas_application_password() {
 
     matching_uuids=()
     if uuid_output="$(${SUDO} wp --path="$WP_DIR" user application-password list \
-        "$WP_ADMIN_USER" --app_id="$WP_ATLAS_APP_ID" --field=uuid \
+        "$WP_ADMIN_USER" --app_id="$WP_BEACON_APP_ID" --field=uuid \
         --allow-root --no-color)"; then
         while IFS= read -r actual_uuid; do
             [[ -n "$actual_uuid" ]] && matching_uuids+=("$actual_uuid")
@@ -519,31 +531,31 @@ ensure_atlas_application_password() {
     fi
     if (( ${#matching_uuids[@]} != 1 )); then
         fallback_uuid="$(${SUDO} wp --path="$WP_DIR" user application-password list \
-            "$WP_ADMIN_USER" --name="$WP_ATLAS_APP_NAME" --field=uuid \
+            "$WP_ADMIN_USER" --name="$WP_BEACON_APP_NAME" --field=uuid \
             --allow-root 2>/dev/null | head -n1 || true)"
         if [[ -n "$fallback_uuid" ]] \
-            && revoke_atlas_application_password "$fallback_uuid"; then
-            fail "The new CDSI Atlas Application Password could not be verified and was revoked."
+            && revoke_beacon_application_password "$fallback_uuid"; then
+            fail "The new CDSI Beacon Application Password could not be verified and was revoked."
         fi
-        fail "The new CDSI Atlas Application Password could not be verified or revoked automatically. Revoke '${WP_ATLAS_APP_NAME}' manually before re-running."
+        fail "The new CDSI Beacon Application Password could not be verified or revoked automatically. Revoke '${WP_BEACON_APP_NAME}' manually before re-running."
     fi
     actual_uuid="${matching_uuids[0]}"
 
     if [[ "$application_password_valid" != true ]]; then
-        if revoke_atlas_application_password "$actual_uuid"; then
+        if revoke_beacon_application_password "$actual_uuid"; then
             fail "WordPress returned an invalid Application Password value; the new credential was revoked."
         fi
         fail "WordPress returned an invalid Application Password value, and UUID ${actual_uuid} could not be revoked automatically. Revoke it manually before re-running."
     fi
 
-    if ! write_atlas_credentials "$actual_uuid" "$application_password"; then
-        if revoke_atlas_application_password "$actual_uuid"; then
-            fail "Failed to save CDSI Atlas credentials to ${WP_ATLAS_PASS_FILE}; the new Application Password was revoked."
+    if ! write_beacon_credentials "$actual_uuid" "$application_password"; then
+        if revoke_beacon_application_password "$actual_uuid"; then
+            fail "Failed to save CDSI Beacon credentials to ${WP_BEACON_PASS_FILE}; the new Application Password was revoked."
         fi
-        fail "Failed to save CDSI Atlas credentials, and the new Application Password could not be revoked automatically. Revoke UUID ${actual_uuid} manually."
+        fail "Failed to save CDSI Beacon credentials, and the new Application Password could not be revoked automatically. Revoke UUID ${actual_uuid} manually."
     fi
 
-    log_ok "CDSI Atlas Application Password saved to: ${WP_ATLAS_PASS_FILE} (mode 600)"
+    log_ok "CDSI Beacon Application Password saved to: ${WP_BEACON_PASS_FILE} (mode 600)"
 }
 
 # ══════════════════════════════════════════════════════════
@@ -641,7 +653,7 @@ provision_php
 download_wordpress
 write_wp_config
 install_core
-ensure_atlas_application_password
+ensure_beacon_application_password
 set_site_url
 configure_nginx
 fix_ownership
@@ -657,14 +669,14 @@ log "  Web root:  ${WP_DIR}"
 log "  DB:        ${DB_NAME} (user ${DB_USER})"
 log "  Admin:     ${WP_ADMIN_USER}"
 log "  WP pass:   ${WP_PASS_FILE} (mode 600)"
-log "  Atlas:     ${WP_ATLAS_PASS_FILE} (mode 600)"
+log "  Beacon:    ${WP_BEACON_PASS_FILE} (mode 600)"
 log "  Login:     ${FINAL_WP_URL}/wp-admin/"
 
 # The full install prints this once in its final verification report. Standalone
 # and single-component runs print it here as their final step.
 if [[ "${CDSI_INSTALL_CONTEXT:-standalone}" != "all" ]]; then
     cdsi_print_wordpress_access "$FINAL_WP_URL" "$WP_PASS_FILE" \
-        "$WP_ADMIN_USER" "$WP_ATLAS_PASS_FILE" "$WP_DOMAIN"
+        "$WP_ADMIN_USER" "$WP_BEACON_PASS_FILE" "$WP_DOMAIN"
 fi
 
 exit 0

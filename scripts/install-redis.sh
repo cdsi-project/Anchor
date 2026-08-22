@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# CDSI Bootstrap — Redis Installer
+# CDSI Anchor — Redis Installer
 # Installs Redis from system default apt source.
 # Generates a random password, sets it in redis.conf,
 # and stores it in password/redis.pass.

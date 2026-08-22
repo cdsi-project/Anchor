@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# CDSI Bootstrap — Configuration & Secrets
+# CDSI Anchor — Configuration & Secrets
 # Manages /etc/cdsi/cdsi.conf and secrets.env.
 # Merged from former lib/config.sh + lib/secrets.sh.
 # M1: Framework only — actual usage begins in M2.

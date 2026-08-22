@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════
-# CDSI Bootstrap — MySQL Installer
+# CDSI Anchor — MySQL Installer
 # Installs MySQL from system default apt source.
 # After install:
 #   • Sets a password for the MySQL 'root'@'localhost' account

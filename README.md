@@ -213,7 +213,7 @@ A creator should eventually be able to migrate away from CDSI without losing the
 
 ## Current Status
 
-CDSI is currently in **M0 — Node Bootstrap**.
+CDSI is currently in **M0 — Node Anchor**.
 
 The first engineering milestone is deliberately narrow:
 
@@ -274,7 +274,7 @@ The target experience is:
 
 ```bash
 git clone <CDSI_REPOSITORY>
-cd cdsi-bootstrap
+cd Anchor
 sudo ./install.sh
 ```
 
@@ -291,7 +291,7 @@ The goal is to reduce infrastructure complexity so that owning an independent di
 
 > The infrastructure should be complex underneath, but simple for the creator.
 
-### Bootstrap Script Entry Points
+### Anchor Script Entry Points
 
 `install.sh` is the primary entry point and coordinates scripts under `scripts/`:
 
@@ -340,7 +340,7 @@ cdsi/
 │
 ├── docs/
 │   └── milestones/
-│       └── M0_NODE_BOOTSTRAP.md
+│       └── M0_NODE_ANCHOR.md
 │
 └── application source...
 ```
@@ -353,7 +353,7 @@ cdsi/
 
 ## Roadmap
 
-### M0 — Node Bootstrap
+### M0 — Node Anchor
 
 Goal:
 
@@ -512,7 +512,7 @@ The final open-source license will be defined before the first public release.
 
 ## Status
 
-**Early-stage / M0 — Node Bootstrap**
+**Early-stage / M0 — Node Anchor**
 
 CDSI is under active development and is not yet ready for production use.
 

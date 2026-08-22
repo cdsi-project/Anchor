@@ -1,4 +1,4 @@
-# CDSI M0 — Node Bootstrap / Installer v0.1
+# CDSI M0 — Node Anchor / Installer v0.1
 
 > **CDSI — Creator Digital Sovereignty Infrastructure**  
 > 本文档用于指导 Codex 实现 CDSI 的第一个工程里程碑：**从一台裸 Ubuntu Server 自动化部署出一个 HTTPS 可访问的 CDSI Node**。

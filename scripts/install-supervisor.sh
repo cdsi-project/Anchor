@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════
-# CDSI Bootstrap — Supervisor Installer
+# CDSI Anchor — Supervisor Installer
 # Installs Supervisor from the system default apt source.
 # Enables and starts the supervisor service, then verifies
 # supervisord is reachable via supervisorctl.

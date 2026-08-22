@@ -2,7 +2,7 @@
 # Copyright 2026 激怒李维斯
 # SPDX-License-Identifier: Apache-2.0
 # ═══════════════════════════════════════════════════════════════
-# CDSI Bootstrap — install.sh
+# CDSI Anchor — install.sh
 # Creator Digital Sovereignty Infrastructure
 #
 # Entry point for the CDSI Node installation process.
@@ -12,7 +12,7 @@
 
 set -Eeuo pipefail
 
-# ── Resolve Bootstrap Root ─────────────────────────────────
+# ── Resolve Anchor Root ─────────────────────────────────
 CDSI_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly CDSI_ROOT
 
@@ -288,9 +288,12 @@ cdsi_post_install_report() {
 
     # ── 4. WordPress access details (keep this as the final result block) ──
     local wp_pass="${CDSI_ROOT}/password/wordpress.pass"
-    local wp_atlas_pass="${CDSI_ROOT}/password/wordpress-atlas.pass"
+    local wp_beacon_pass="${CDSI_ROOT}/password/wordpress-beacon.pass"
+    if [[ ! -f "$wp_beacon_pass" && -f "${CDSI_ROOT}/password/wordpress-atlas.pass" ]]; then
+        wp_beacon_pass="${CDSI_ROOT}/password/wordpress-atlas.pass"
+    fi
     cdsi_print_wordpress_access "$site_url" "$wp_pass" "cdsi" \
-        "$wp_atlas_pass" "$domain"
+        "$wp_beacon_pass" "$domain"
 
     log_blank
     log_info "以上凭据仅显示在当前终端，并保存在 password/ 目录（mode 600）；请勿提交到版本库。"

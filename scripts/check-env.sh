@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# CDSI Bootstrap — Environment Check
+# CDSI Anchor — Environment Check
 # Inspects the server before any installation begins.
 # M1 Core: this is the primary deliverable of Milestone 1.
 # ═══════════════════════════════════════════════════════════════

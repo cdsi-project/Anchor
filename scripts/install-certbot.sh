@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# CDSI Bootstrap — Certbot (Let's Encrypt) Installer
+# CDSI Anchor — Certbot (Let's Encrypt) Installer
 #
 # Installs Certbot + the Nginx plugin from the system apt source,
 # then obtains and auto-configures a free TLS certificate for a
@@ -27,7 +27,7 @@
 
 set -Eeuo pipefail
 
-# ── Locate bootstrap root (for the persisted domain file) ─
+# ── Locate installer root (for the persisted domain file) ─
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 

@@ -140,7 +140,7 @@ Infrastructure complexity should be pushed below the user-facing layer wherever 
 
 The project is currently in:
 
-# M0 — Node Bootstrap
+# M0 — Node Anchor
 
 Current priority:
 
