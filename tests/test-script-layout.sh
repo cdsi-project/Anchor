@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 TEST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+remote_bootstrap="${TEST_ROOT}/bootstrap.sh"
 entries=(
     check-env.sh
     install-nginx.sh
@@ -16,6 +17,16 @@ configuration_entries=(
     configure-domain.sh
     configure-https.sh
 )
+
+[[ -f "$remote_bootstrap" ]] \
+    || { printf 'FAIL: missing root remote bootstrap entry\n' >&2; exit 1; }
+/bin/sh -n "$remote_bootstrap" \
+    || { printf 'FAIL: root remote bootstrap is not POSIX shell compatible\n' >&2; exit 1; }
+grep -Fq 'https://gitee.com/cdsi/anchor.git' "$remote_bootstrap" \
+    && grep -Fq 'https://github.com/cdsi-project/Anchor.git' "$remote_bootstrap" \
+    || { printf 'FAIL: remote bootstrap lacks the official mirror fallback pair\n' >&2; exit 1; }
+grep -Fq 'bootstrap_start_installer' "$remote_bootstrap" \
+    || { printf 'FAIL: remote bootstrap does not hand off to install.sh\n' >&2; exit 1; }
 
 for entry in "${configuration_entries[@]}"; do
     script="${TEST_ROOT}/scripts/${entry}"

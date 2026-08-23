@@ -15,7 +15,7 @@
 | 内存 | 最低 1 GB，推荐 2 GB |
 | 根分区可用空间 | 最低 10 GB，推荐 20 GB |
 | 端口 | 80（HTTP）对公网开放；启用 HTTPS 时还需开放 443 |
-| 依赖 | systemd、git、curl、sha256sum，以及 APT 或 DNF |
+| 最低引导依赖 | systemd、APT 或 DNF、`/bin/sh`、coreutils，以及 curl/wget 之一 |
 
 **域名（可选但推荐）**：使用指向服务器的裸域名（例如
 `cdsi.example.com`，不要带协议、端口或路径）作为 WordPress 站点 URL，并可
@@ -34,24 +34,55 @@ GD，不安装 Imagick。
 
 ## 2. 快速安装
 
-Debian 13 最小化系统在克隆仓库前先准备 Git 和 CA 证书：
+国内服务器优先通过 Gitee 获取根目录 `bootstrap.sh`：
 
 ```bash
-sudo apt update
-sudo apt install -y git ca-certificates
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh \
+  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
-三步搞定：
+只有 `wget` 时：
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/cdsi-project/Anchor.git
+wget -qO anchor-bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh && \
+  sh anchor-bootstrap.sh
+```
+
+引导脚本会在任何包变更前检查系统、架构、systemd、权限和交互终端，然后：
+
+1. 使用当前配置的系统默认源执行 APT metadata update 或 DNF
+   `makecache --refresh`。
+2. 安装 `bash`、Git、curl、CA 证书和 coreutils。
+3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.0` Anchor
+   发布版到 `/opt/cdsi-anchor`。
+4. 启动 `install.sh` 交互菜单。
+
+这里的“更新源”仅指刷新软件包索引。脚本不会替换镜像地址，不会执行
+`apt upgrade`/`dnf update` 全系统升级，也不会提前启用 EPEL；CentOS 的 EPEL
+仍由 Certbot 安装步骤按需启用并记录。
+
+GitHub 引导地址：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.0/bootstrap.sh \
+  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
+```
+
+如果只想准备代码、不立即进入菜单：
+
+```bash
+sh anchor-bootstrap.sh --no-start
+```
+
+已有 Git 时也可以手动安装：
+
+```bash
+git clone https://gitee.com/cdsi/anchor.git Anchor
 cd Anchor
-
-# 2. 运行安装器（需要 root）
 sudo ./install.sh
-
-# 3. 按提示操作（见下方详解）
 ```
 
 安装器会先做系统预检（Preflight Check），通过后进入主菜单。
@@ -431,6 +462,27 @@ sudo nginx -t && sudo systemctl reload nginx
 
 无害，可忽略。安装器会尝试设置 Backspace 键映射，非交互终端下会跳过。
 
+### Q: 新服务器没有 Git，怎么安装？
+
+使用第 2 节的 `bootstrap.sh` 入口。它会从系统默认源安装 Git 和其他最小引导
+工具，再进入 `install.sh`。完全没有 curl/wget 的系统无法下载远程脚本，需要先
+通过 APT/DNF 安装任一 HTTPS 下载工具。
+
+默认目录是 `/opt/cdsi-anchor`。重复执行时，脚本只会更新由 bootstrap 创建、
+来源为官方 Gitee/GitHub、当前分支正确且工作区干净的仓库，并且只允许
+fast-forward。非 Git 目录、符号链接、未知远端或本地修改都会停止，不会覆盖。
+
+### Q: bootstrap 下载或更新失败怎么办？
+
+如果 Gitee 的脚本下载失败，请改用第 2 节的 GitHub 下载命令。脚本开始运行后，
+Git checkout 会先尝试 Gitee、再尝试 GitHub；两者都失败时不会留下半成品安装
+目录。检查服务器 DNS、HTTPS 出站连接和系统时间后重试。无交互终端时可先执行
+`sh anchor-bootstrap.sh --no-start`，之后通过 SSH 运行：
+
+```bash
+sudo bash /opt/cdsi-anchor/install.sh
+```
+
 ### Q: WordPress 后台登录密码在哪？
 
 ```bash
@@ -502,6 +554,7 @@ Debian 13 的 MariaDB root 认证由系统默认的 `unix_socket` 提供，使�
 
 ```
 Anchor/
+├── bootstrap.sh                  # 新服务器远程引导，准备工具后调用 install.sh
 ├── install.sh                    # 主安装器入口
 ├── uninstall.sh                  # 卸载器
 ├── SHA256SUMS                    # CDN 下载文件的固定 SHA-256
@@ -540,14 +593,7 @@ Anchor/
 │   ├── system.sh                 # 系统工具
 │   └── wordpress-access.sh       # WordPress / Beacon 最终访问信息
 ├── tests/
-│   ├── test-apt.sh               # apt-get 重试单元测试
-│   ├── test-dnf.sh               # DNF 重试单元测试
-│   ├── test-install-order.sh     # 安装全部依赖顺序/Certbot 降级测试
-│   ├── test-packages.sh          # APT/DNF/EPEL 软件包抽象测试
-│   ├── test-platform.sh          # 平台检测与路由约束测试
-│   ├── test-preflight.sh         # 支持版本与安全状态预检测试
-│   ├── test-services.sh          # systemd 服务抽象测试
-│   └── test-uninstall.sh         # 卸载 dry-run/数据库认证保护测试
+│   └── test-*.sh                 # 引导、平台、组件、域名、服务与卸载回归测试
 ├── password/                     # 密码文件（gitignored，安装时生成）
 │   ├── mysql.pass
 │   ├── redis.pass

@@ -33,18 +33,22 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 ## 安装
 
 支持 Ubuntu Server 24.04/26.04 LTS、Debian 13 和 CentOS Stream 10。主安装器
-需要 root/sudo 权限和交互式终端。Debian 13 最小化系统应先准备 Git 和 CA
-证书：
+需要 root/sudo 权限和交互式终端。新服务器无需预装 Git，国内服务器可使用：
 
 ```bash
-sudo apt update
-sudo apt install -y git ca-certificates
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh \
+  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
-然后克隆并运行安装器：
+根目录 `bootstrap.sh` 会刷新系统默认源的元数据，安装 Git、Bash、curl、CA
+证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.0` 发布标签，
+然后进入 `install.sh`。它不会改写软件源或执行全系统升级。
+
+已有 Git 时也可手动克隆：
 
 ```bash
-git clone https://github.com/cdsi-project/Anchor.git
+git clone https://gitee.com/cdsi/anchor.git Anchor
 cd Anchor
 sudo ./install.sh
 ```

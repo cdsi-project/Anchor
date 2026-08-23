@@ -292,10 +292,8 @@ Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13** 和
      20 GB 根分区可用空间
    - 登录用户需要 root 或 sudo 权限
    - 系统使用 systemd，以及 Ubuntu/Debian APT 或 CentOS DNF 默认软件源
-   - Debian 13 需要先更新 APT 索引并安装 Git 与 CA 证书，完整命令见下方
-     “Installation Experience”
-   - CentOS Stream 10 需要先更新系统、启用 EPEL 并安装 Git，完整命令见下方
-     “Installation Experience”
+   - 使用远程引导时只需任一支持 HTTPS 的下载工具（`curl` 或 `wget`）；Git、
+     CA 证书和其他引导工具由脚本自动安装
 2. **稳定的公网入口和网络连接**
    - 准备公网 IP
    - 防火墙开放 80 端口和实际使用的 SSH 管理端口；启用 HTTPS 时再确保
@@ -338,39 +336,64 @@ HTTPS，但不满足 IP 证书所需的 Certbot 5.4+ 能力。公网 IP 探测�
 
 ## Installation Experience
 
-The current entry point is:
+### 新服务器快速启动
 
-Debian 13 需要先通过系统默认源准备 Git 和 CA 证书：
-
-```bash
-sudo apt update
-sudo apt install -y git ca-certificates
-```
-
-CentOS Stream 10 需要先通过系统默认源完成安装前准备：
+国内服务器使用 Gitee 下载远程引导脚本：
 
 ```bash
-sudo dnf update -y
-sudo dnf install epel-release -y
-sudo dnf update -y
-sudo dnf install -y git
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh \
+  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
-国内服务器建议使用 Gitee（码云）镜像：
+只有 `wget` 时：
+
+```bash
+wget -qO anchor-bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh && \
+  sh anchor-bootstrap.sh
+```
+
+脚本会自动完成以下步骤：
+
+1. 检查操作系统、CPU 架构、systemd、root/sudo 权限和交互终端。
+2. 刷新当前系统默认 APT/DNF 仓库的元数据，不改写软件源、不执行全系统升级。
+3. 安装 `bash`、Git、curl、CA 证书和 coreutils。
+4. 优先从 Gitee 克隆经过 annotated tag 固定的 `v0.3.0` 发布版，失败时尝试
+   GitHub，默认保存到 `/opt/cdsi-anchor`。
+5. 自动进入 `install.sh` 的交互菜单。
+
+脚本下载到本地后再执行，因此用户可以先检查内容；非 root 用户执行时会通过
+`sudo` 请求权限。远程可执行脚本只通过 HTTPS 分发，不提供 HTTP 入口。
+
+GitHub 下载入口：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.0/bootstrap.sh \
+  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
+```
+
+只准备环境和代码、不立即进入安装菜单：
+
+```bash
+sh anchor-bootstrap.sh --no-start
+```
+
+### 手动安装
+
+已有 Git 时仍可手动克隆。国内服务器建议使用 Gitee：
 
 ```bash
 git clone https://gitee.com/cdsi/anchor.git Anchor
+cd Anchor
+sudo ./install.sh
 ```
 
 也可以使用 GitHub：
 
 ```bash
 git clone https://github.com/cdsi-project/Anchor.git Anchor
-```
-
-克隆完成后运行：
-
-```bash
 cd Anchor
 sudo ./install.sh
 ```
@@ -454,6 +477,7 @@ Anchor/
 ├── INSTALL.md
 ├── CDSI-Anchor.md
 ├── CDSI_MANIFESTO_ZH_EN.md
+├── bootstrap.sh          # 新服务器远程引导入口，准备工具后调用 install.sh
 ├── install.sh
 ├── uninstall.sh
 ├── SHA256SUMS
@@ -477,10 +501,13 @@ Anchor/
 └── password/             # generated locally and ignored by Git
 ```
 
-`install.sh` is the orchestration entry point. Scripts under `scripts/` must
-remain independently runnable and communicate success or failure through their
-exit code. `AGENTS.md` defines repository engineering rules; older documents
-under `docs/` are retained as design history and are labeled accordingly.
+Root `bootstrap.sh` is the version-pinned remote entry for an otherwise unprepared server;
+`lib/bootstrap.sh` only transfers checked-out POSIX entry points into Bash.
+`install.sh` remains the orchestration entry point. Scripts under `scripts/`
+must remain independently runnable and communicate success or failure through
+their exit code. `AGENTS.md` defines repository engineering rules; older
+documents under `docs/` are retained as design history and are labeled
+accordingly.
 
 ---
 

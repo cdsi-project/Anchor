@@ -149,6 +149,8 @@ Current priority:
 
 The current working baseline already includes:
 
+- a POSIX remote bootstrap that prepares an otherwise unconfigured server and
+  hands control to `install.sh`
 - preflight, logging, and component orchestration in `install.sh`
 - Nginx, MySQL/MariaDB, PHP-FPM, Certbot, and WordPress installation
 - Ubuntu/Debian APT and CentOS DNF package backends with bounded retry
@@ -292,6 +294,7 @@ Current installer structure:
 
 ```text
 Anchor/
+├── bootstrap.sh                  # remote new-server bootstrap
 ├── install.sh
 ├── uninstall.sh
 ├── SHA256SUMS
@@ -325,16 +328,33 @@ Anchor/
 └── docs/
 ```
 
+Root `bootstrap.sh` is a small POSIX remote entry point. It may validate the
+supported platform, refresh metadata for the configured system repositories,
+install the minimum download/runtime tools, and obtain or safely fast-forward a
+bootstrap-managed Anchor checkout. It must not replace repository configuration,
+perform a full operating-system upgrade, enable EPEL early, overwrite an
+unmanaged checkout, or absorb component installation logic. `lib/bootstrap.sh`
+has a separate internal role: it transfers checked-out POSIX entry points into
+Bash.
+
 `install.sh` owns user interaction and orchestration. Public component commands
 under `scripts/` detect the operating system and dispatch to a platform route.
 The `ubuntu/`, `debian/`, and `centos-stream/` routes are implemented. Their
-wrappers invoke the shared implementations under `scripts/common/`.
-Shared primitives belong under `lib/`. Keep these layers small and
+wrappers invoke the shared implementations under `scripts/common/`. Shared
+primitives belong under `lib/`. Keep these layers small and
 responsibility-focused.
 
 ---
 
 # 7. Script Convention
+
+The public root `bootstrap.sh` must remain POSIX `/bin/sh` compatible because it
+runs before Bash and Git can be assumed. Its documented download URL must use
+HTTPS and a versioned release tag, never a mutable branch. Gitee is the primary
+domestic clone source and GitHub is the fallback.
+Failed downloads must remain staged outside the final checkout, and an existing
+checkout may be updated only when it is explicitly bootstrap-managed, uses an
+approved remote, has no local changes, and can fast-forward.
 
 Every public script directly under `scripts/` must remain independently
 runnable. `install.sh` invokes component scripts as child processes and relies
@@ -827,7 +847,8 @@ Healthy CDSI Node
 
 Important scenarios:
 
-1. Fresh server installation.
+1. Fresh server installation, including a server without Git or Bash prepared
+   through root `bootstrap.sh`.
 2. Installer run twice.
 3. Server reboot.
 4. Existing Nginx.
@@ -855,6 +876,7 @@ over.
 Implemented:
 
 ```text
+POSIX new-server bootstrap with Gitee/GitHub retrieval
 Preflight and logging
 Nginx / MySQL or MariaDB / PHP-FPM / Certbot / WordPress
 Domain-aware HTTP/HTTPS setup
