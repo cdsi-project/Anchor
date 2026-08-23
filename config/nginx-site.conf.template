@@ -3,19 +3,22 @@
 # Template variables (replaced at install time via sed):
 #   {{WP_DOMAIN}}  → server_name (domain, or _ for catch-all)
 #   {{WP_DIR}}     → document root (e.g. /var/www/wordpress)
-#   {{PHP_SOCK}}   → php-fpm socket path (e.g. /run/php/php8.5-fpm.sock)
+#   {{PHP_UPSTREAM}} → php-fpm upstream (e.g. unix:/run/php/php8.5-fpm.sock)
+#   {{TLS_INCLUDE_DIR}} → Anchor-managed optional TLS snippets
 #
 # To customise: edit this file, then re-run install-wordpress.sh (option 7)
 # or the full installer (option 0). The template is copied to
-# /etc/nginx/sites-available/<domain>.conf with variables substituted.
+# the platform Nginx site directory with variables substituted.
 #
-# Certbot (--nginx) will inject the 443 ssl block + HTTP→HTTPS redirect on top
-# of this config when a TLS certificate is obtained.
+# Domain certificates are installed by Certbot's Nginx plugin. Anchor uses the
+# empty-safe include below when it must install an IP certificate itself.
 
 server {
     listen 80;
     listen [::]:80;
     server_name {{WP_DOMAIN}};
+
+    include {{TLS_INCLUDE_DIR}}/*.conf;
 
     root {{WP_DIR}};
     index index.php index.html index.htm;
@@ -42,14 +45,6 @@ server {
         access_log off;
     }
 
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:{{PHP_SOCK}};
-        fastcgi_buffers 16 16k;
-        fastcgi_buffer_size 32k;
-        fastcgi_read_timeout 300;
-    }
-
     # Deny access to sensitive dotfiles
     location ~ /\.(ht|git|env|svn|hg) {
         deny all;
@@ -58,5 +53,14 @@ server {
     # Deny PHP execution in uploads (prevent malicious script execution)
     location ~* /(?:uploads|files)/.*\.php$ {
         deny all;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_pass {{PHP_UPSTREAM}};
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+        fastcgi_read_timeout 300;
     }
 }

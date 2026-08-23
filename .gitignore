@@ -19,6 +19,7 @@ password/*.pass
 # === Deployment-specific values (never commit) ===
 # Domain entered at install.sh entry is deployment-specific.
 config/domain
+config/domain.pending
 
 # === OS / editor noise ===
 .DS_Store

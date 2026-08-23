@@ -1,4 +1,9 @@
-#!/usr/bin/env bash
+#!/bin/sh
+if [ -z "${BASH_VERSION:-}" ]; then
+    _cdsi_entry_dir=$(CDPATH= cd "$(dirname "$0")" && pwd) || exit 1
+    exec /bin/sh "${_cdsi_entry_dir}/lib/bootstrap.sh" \
+        "${_cdsi_entry_dir}/$(basename "$0")" "$@"
+fi
 # ═══════════════════════════════════════════════════════════════
 # CDSI Anchor — uninstall.sh
 # Creator Digital Sovereignty Infrastructure
@@ -43,6 +48,18 @@ CDSI_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly CDSI_ROOT
 PASS_DIR="${CDSI_ROOT}/password"
 
+# shellcheck source=lib/platform.sh
+source "${CDSI_ROOT}/lib/platform.sh"
+# shellcheck source=lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
+# shellcheck source=lib/dnf.sh
+source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=lib/packages.sh
+source "${CDSI_ROOT}/lib/packages.sh"
+# shellcheck source=lib/services.sh
+source "${CDSI_ROOT}/lib/services.sh"
+cdsi_platform_init
+
 if [[ "${EUID}" -eq 0 ]]; then
     SUDO=()
 elif command -v sudo >/dev/null 2>&1; then
@@ -79,58 +96,70 @@ stop_disable_svc() {
         log_dry "将停止并禁用服务: $svc"
         return 0
     fi
-    "${SUDO[@]}" systemctl stop "$svc" 2>/dev/null || true
-    "${SUDO[@]}" systemctl disable "$svc" 2>/dev/null || true
+    cdsi_service_stop_disable "$svc" 2>/dev/null || true
 }
 
-# Purge a list of explicitly named apt packages (only those installed).
+# Remove a list of explicitly named packages (only those installed).
 purge_packages() {
     local pkgs=() p
     for p in "$@"; do
-        if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed"; then
+        if cdsi_package_installed "$p"; then
             pkgs+=("$p")
         fi
     done
     if [[ ${#pkgs[@]} -eq 0 ]]; then
-        log "  (无相关 apt 包已安装，跳过)"
+        log "  (无相关系统包已安装，跳过)"
         return 0
     fi
     if [[ "$DRY_RUN" == true ]]; then
-        log_dry "将执行: apt-get purge -y ${pkgs[*]}"
+        log_dry "将通过 ${CDSI_PACKAGE_BACKEND} 删除: ${pkgs[*]}"
         return 0
     fi
-    "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get purge -y "${pkgs[@]}" \
-        || log_warn "apt-get purge 部分包失败 (继续)"
+    cdsi_packages_remove "${pkgs[@]}" \
+        || log_warn "部分系统包删除失败 (继续)"
 }
 
-# Purge every *installed* package matching a dpkg glob (e.g. 'nginx*').
-# Only packages with status "install ok installed" are touched, so a glob
-# never removes unrelated packages that merely exist in the apt cache.
+# Remove every installed package matching a shell glob (e.g. 'nginx*').
 purge_glob() {
     local pattern="$1"
-    local pkgs
-    pkgs="$(dpkg-query -W -f='${Package} ${Status}\n' "$pattern" 2>/dev/null \
-            | awk '$NF=="installed"{print $1}' || true)"
-    if [[ -z "$pkgs" ]]; then
+    local p
+    local -a pkgs=()
+    case "$CDSI_PACKAGE_BACKEND" in
+        apt)
+            while IFS= read -r p; do
+                [[ -n "$p" ]] && pkgs+=("$p")
+            done < <(dpkg-query -W -f='${Package} ${Status}\n' "$pattern" 2>/dev/null \
+                | awk '$NF=="installed"{print $1}' || true)
+            ;;
+        dnf)
+            while IFS= read -r p; do
+                [[ -n "$p" && "$p" == $pattern ]] && pkgs+=("$p")
+            done < <(rpm -qa --qf '%{NAME}\n' 2>/dev/null || true)
+            ;;
+        *)
+            log_warn "未知包管理后端，未删除匹配包: $pattern"
+            return 1
+            ;;
+    esac
+    if [[ ${#pkgs[@]} -eq 0 ]]; then
         log "  (无匹配 $pattern 的已安装包，跳过)"
         return 0
     fi
     if [[ "$DRY_RUN" == true ]]; then
-        log_dry "将执行: apt-get purge -y $pkgs"
+        log_dry "将通过 ${CDSI_PACKAGE_BACKEND} 删除: ${pkgs[*]}"
         return 0
     fi
-    # shellcheck disable=SC2086
-    "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get purge -y $pkgs \
-        || log_warn "apt-get purge 失败 (继续)"
+    cdsi_packages_remove "${pkgs[@]}" \
+        || log_warn "匹配包删除失败 (继续)"
 }
 
-# Run apt autoremove --purge to clean orphaned dependencies.
+# Remove orphaned dependencies through the active package manager.
 autoremove() {
     if [[ "$DRY_RUN" == true ]]; then
-        log_dry "将执行: apt-get autoremove --purge -y"
+        log_dry "将通过 ${CDSI_PACKAGE_BACKEND} 自动删除孤立依赖"
         return 0
     fi
-    "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y 2>/dev/null || true
+    cdsi_packages_autoremove 2>/dev/null || true
 }
 
 # ── MySQL root helper (reads root password from password file) ─
@@ -164,18 +193,183 @@ drop_cdsi_database() {
     return 0
 }
 
+read_root_marker() {
+    local marker="$1"
+    "${SUDO[@]}" cat -- "$marker" 2>/dev/null
+}
+
+# Restore only host-security changes that Anchor recorded when it made them.
+remove_anchor_firewall_services() {
+    local marker="/etc/cdsi/firewall-added-services"
+    [[ -f "$marker" ]] || return 0
+
+    local scope service_name marker_entry marker_content failed=0
+    marker_content="$(read_root_marker "$marker")" \
+        || { log_warn "无法读取 firewalld 记录文件: $marker"; return 1; }
+
+    # Validate the entire marker before changing either firewalld layer.
+    while IFS= read -r marker_entry; do
+        [[ -n "$marker_entry" ]] || continue
+        case "$marker_entry" in
+            permanent:http|permanent:https|runtime:http|runtime:https) ;;
+            *)
+                log_warn "忽略无效的 firewalld 记录: $marker_entry"
+                return 1
+                ;;
+        esac
+    done <<< "$marker_content"
+
+    while IFS= read -r marker_entry; do
+        [[ -n "$marker_entry" ]] || continue
+        scope="${marker_entry%%:*}"
+        service_name="${marker_entry#*:}"
+        if [[ "$DRY_RUN" == true ]]; then
+            log_dry "将删除 Anchor 添加的 firewalld ${scope} 服务: $service_name"
+        elif [[ "$scope" == "runtime" ]]; then
+            # Runtime rules cease to exist when firewalld is stopped. Never
+            # touch the permanent configuration for a runtime-only marker.
+            if systemctl is-active --quiet firewalld 2>/dev/null; then
+                if ! command -v firewall-cmd >/dev/null 2>&1; then
+                    log_warn "firewalld 正在运行但 firewall-cmd 不可用，无法回滚 runtime 服务 ${service_name}。"
+                    failed=1
+                elif "${SUDO[@]}" firewall-cmd \
+                    --query-service="$service_name" >/dev/null 2>&1 \
+                    && ! "${SUDO[@]}" firewall-cmd \
+                        --remove-service="$service_name" >/dev/null 2>&1; then
+                    failed=1
+                fi
+            fi
+        elif systemctl is-active --quiet firewalld 2>/dev/null; then
+            if ! command -v firewall-cmd >/dev/null 2>&1; then
+                log_warn "firewalld 正在运行但 firewall-cmd 不可用，无法回滚 permanent 服务 ${service_name}。"
+                failed=1
+            elif "${SUDO[@]}" firewall-cmd --permanent \
+                --query-service="$service_name" >/dev/null 2>&1 \
+                && ! "${SUDO[@]}" firewall-cmd --permanent \
+                    --remove-service="$service_name" >/dev/null 2>&1; then
+                failed=1
+            fi
+        elif command -v firewall-offline-cmd >/dev/null 2>&1; then
+            if "${SUDO[@]}" firewall-offline-cmd \
+                --query-service="$service_name" >/dev/null 2>&1 \
+                && ! "${SUDO[@]}" firewall-offline-cmd \
+                    --remove-service="$service_name" >/dev/null 2>&1; then
+                failed=1
+            fi
+        else
+            log_warn "无法回滚 firewalld permanent 服务 ${service_name}；保留记录文件。"
+            failed=1
+        fi
+    done <<< "$marker_content"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log_dry "将删除: $marker"
+    elif [[ "$failed" -eq 0 ]]; then
+        "${SUDO[@]}" rm -f -- "$marker"
+    else
+        return 1
+    fi
+}
+
+remove_anchor_selinux_state() {
+    local fcontext_marker="/etc/cdsi/selinux-wordpress-fcontext"
+    local boolean_marker="/etc/cdsi/selinux-httpd-db-boolean"
+    local pattern=""
+
+    if [[ -f "$fcontext_marker" ]]; then
+        pattern="$(read_root_marker "$fcontext_marker")" \
+            || { log_warn "无法读取 SELinux 文件上下文记录。"; return 1; }
+        if [[ "$pattern" != "/var/www/wordpress(/.*)?" ]]; then
+            log_warn "SELinux 文件上下文记录无效，未自动删除规则。"
+            return 1
+        elif [[ "$DRY_RUN" == true ]]; then
+            log_dry "将删除 Anchor 添加的 SELinux 文件上下文: $pattern"
+            log_dry "将删除: $fcontext_marker"
+        elif command -v semanage >/dev/null 2>&1; then
+            "${SUDO[@]}" semanage fcontext -d "$pattern" \
+                || { log_warn "无法删除 SELinux 文件上下文规则。"; return 1; }
+            "${SUDO[@]}" rm -f -- "$fcontext_marker"
+        else
+            log_warn "semanage 不可用，无法回滚 SELinux 文件上下文。"
+            return 1
+        fi
+    fi
+
+    if [[ -f "$boolean_marker" ]]; then
+        local boolean_name=""
+        boolean_name="$(read_root_marker "$boolean_marker")" \
+            || { log_warn "无法读取 SELinux 布尔值记录。"; return 1; }
+        if [[ "$boolean_name" != "httpd_can_network_connect_db" ]]; then
+            log_warn "SELinux 布尔值记录无效，未自动回滚。"
+            return 1
+        elif [[ "$DRY_RUN" == true ]]; then
+            log_dry "将恢复 SELinux 布尔值: httpd_can_network_connect_db=off"
+            log_dry "将删除: $boolean_marker"
+        elif command -v setsebool >/dev/null 2>&1; then
+            "${SUDO[@]}" setsebool -P httpd_can_network_connect_db off \
+                || { log_warn "无法恢复 SELinux 数据库连接布尔值。"; return 1; }
+            "${SUDO[@]}" rm -f -- "$boolean_marker"
+        else
+            log_warn "setsebool 不可用，无法回滚 SELinux 布尔值。"
+            return 1
+        fi
+    fi
+}
+
+remove_anchor_epel() {
+    local marker="/etc/cdsi/epel-added"
+    [[ -f "$marker" ]] || return 0
+    local marker_value=""
+    marker_value="$(read_root_marker "$marker")" \
+        || { log_warn "无法读取 EPEL 记录文件。"; return 1; }
+    if [[ "$marker_value" != "epel-release" ]]; then
+        log_warn "EPEL 记录内容无效，未自动删除仓库。"
+        return 1
+    fi
+    if [[ "$DRY_RUN" == true ]]; then
+        log_dry "将删除 Anchor 添加的 EPEL 仓库包: epel-release"
+        log_dry "将删除: $marker"
+        return 0
+    fi
+    if cdsi_package_installed epel-release; then
+        cdsi_packages_remove epel-release \
+            || { log_warn "无法删除 Anchor 添加的 EPEL 仓库。"; return 1; }
+    fi
+    "${SUDO[@]}" rm -f -- "$marker"
+}
+
 # ── Per-component uninstallers ──────────────────────────────
+
+read_anchor_domain() {
+    local domain_file="${1:-${CDSI_ROOT}/config/domain}"
+    [[ -f "$domain_file" ]] || return 0
+    head -n1 "$domain_file" 2>/dev/null | tr -d '[:space:]' || true
+}
+
+detect_installed_php_version() {
+    local version=""
+    version="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' \
+        2>/dev/null || true)"
+    if [[ -z "$version" && "$CDSI_PACKAGE_BACKEND" == "apt" ]]; then
+        version="$(dpkg-query -W -f='${Package}\n' 'php*-fpm' 2>/dev/null \
+            | head -1 | sed -E 's/^php([0-9]+\.[0-9]+)-fpm$/\1/' || true)"
+    fi
+    printf '%s' "$version"
+}
 
 uninstall_nginx() {
     log "── 卸载 Nginx ──"
     local d=""
-    d="$(cat "${CDSI_ROOT}/config/domain" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    d="$(read_anchor_domain)"
     if [[ -d /var/www/wordpress ]] \
-       || [[ -f /etc/nginx/sites-enabled/wordpress ]] \
-       || { [[ -n "$d" ]] && [[ -f "/etc/nginx/sites-enabled/${d}.conf" ]]; }; then
-        log_warn "检测到 WordPress 站点仍在 /etc/nginx，建议先卸载 WordPress (或一并卸载全部)。"
+       || [[ -f "${CDSI_NGINX_ENABLED_DIR}/wordpress" ]] \
+       || [[ -f "${CDSI_NGINX_ENABLED_DIR}/wordpress.conf" ]] \
+       || { [[ -n "$d" ]] && [[ -f "${CDSI_NGINX_ENABLED_DIR}/${d}.conf" ]]; }; then
+        log_warn "检测到 WordPress 站点仍在 ${CDSI_NGINX_ENABLED_DIR}，建议先卸载 WordPress (或一并卸载全部)。"
     fi
-    stop_disable_svc nginx
+    remove_anchor_firewall_services \
+        || log_warn "部分 Anchor firewalld 状态未能回滚；记录文件已保留。"
+    stop_disable_svc "$CDSI_NGINX_SERVICE"
     purge_glob 'nginx*'
     log_ok "Nginx 已卸载 (含 nginx-common / nginx-core / 站点配置)。"
 }
@@ -185,12 +379,17 @@ uninstall_mysql() {
     # Drop the CDSI database/user while the server is still up.
     drop_cdsi_database \
         || log_warn "无法单独删除 cdsi 库/用户；MySQL 数据目录仍将按确认范围清理。"
-    stop_disable_svc mysql
-    purge_glob 'mysql-server*'
-    purge_glob 'mysql-client*'
-    purge_glob 'mysql-common'
+    stop_disable_svc "$CDSI_DB_SERVICE"
+    if cdsi_is_centos_stream; then
+        purge_glob 'mysql8.4*'
+        do_rm /etc/my.cnf.d/zz-cdsi-anchor.cnf
+    else
+        purge_glob 'mysql-server*'
+        purge_glob 'mysql-client*'
+        purge_glob 'mysql-common'
+        do_rm /etc/mysql
+    fi
     do_rm /var/lib/mysql
-    do_rm /etc/mysql
     do_rm "${PASS_DIR}/mysql.pass"
     log_ok "MySQL 已卸载 (数据库 cdsi 与凭据已清理)。"
 }
@@ -199,18 +398,24 @@ uninstall_php() {
     log "── 卸载 PHP-FPM ──"
     # Learn the installed PHP version (default 'php' first, else from php-fpm pkg).
     local ver=""
-    ver="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || true)"
-    if [[ -z "$ver" ]]; then
-        ver="$(dpkg-query -W -f='${Package}\n' 'php*-fpm' 2>/dev/null | head -1 | sed -E 's/^php([0-9]+\.[0-9]+)-fpm$/\1/')"
-    fi
-    if [[ -n "$ver" ]]; then
-        stop_disable_svc "php${ver}-fpm"
+    ver="$(detect_installed_php_version)"
+    local php_service=""
+    php_service="$(cdsi_php_service_name "$ver" 2>/dev/null || true)"
+    if [[ -n "$php_service" ]]; then
+        stop_disable_svc "$php_service"
     fi
     # Curated list = exactly what install-php.sh provisions (plus versioned forms).
     # Avoids a broad 'php*' glob that could remove unrelated PHP packages.
-    local pkgs=(php-cli php-fpm php-common php-curl php-mbstring php-xml php-zip \
-                php-bcmath php-intl php-mysql php-opcache php-redis php-gd php-imagick)
-    if [[ -n "$ver" ]]; then
+    local pkgs=()
+    if cdsi_is_centos_stream; then
+        pkgs=(php php-cli php-fpm php-common php-mbstring php-xml php-bcmath \
+              php-intl php-mysqlnd php-process php-opcache php-pecl-redis6 \
+              php-gd php-pecl-zip php-pecl-imagick)
+    else
+        pkgs=(php-cli php-fpm php-common php-curl php-mbstring php-xml php-zip \
+              php-bcmath php-intl php-mysql php-opcache php-redis php-gd php-imagick)
+    fi
+    if cdsi_is_ubuntu && [[ -n "$ver" ]]; then
         pkgs+=( "php${ver}-fpm" "php${ver}-cli" "php${ver}-common" "php${ver}-opcache" \
                  "php${ver}-curl" "php${ver}-mbstring" "php${ver}-xml" "php${ver}-zip" \
                  "php${ver}-bcmath" "php${ver}-intl" "php${ver}-mysql" "php${ver}-redis" \
@@ -222,6 +427,10 @@ uninstall_php() {
 
 uninstall_redis() {
     log "── 卸载 Redis ──"
+    if cdsi_is_centos_stream; then
+        log_warn "Redis 不是 CentOS Stream 的 Anchor 组件，跳过以保护现有服务。"
+        return 0
+    fi
     stop_disable_svc redis-server
     purge_glob 'redis*'
     do_rm /etc/redis
@@ -232,6 +441,10 @@ uninstall_redis() {
 
 uninstall_supervisor() {
     log "── 卸载 Supervisor ──"
+    if cdsi_is_centos_stream; then
+        log_warn "Supervisor 不是 CentOS Stream 的 Anchor 组件，跳过以保护现有服务。"
+        return 0
+    fi
     stop_disable_svc supervisor
     purge_packages supervisor
     do_rm /etc/supervisor
@@ -311,14 +524,14 @@ _certbot_strip_nginx_file() {
 
 # Strip the SSL directives Certbot injected into Nginx site blocks.
 _certbot_cleanup_nginx() {
-    [[ -d /etc/nginx/sites-available ]] || return 0
+    [[ -d "$CDSI_NGINX_SITE_DIR" || -d "$CDSI_NGINX_ENABLED_DIR" ]] || return 0
     command -v nginx >/dev/null 2>&1 || return 0
     local touched=0 failed=0 backup_dir=""
     local -a targets=() backups=()
     local f target backup idx
     declare -A seen=()
 
-    for f in /etc/nginx/sites-available/* /etc/nginx/sites-enabled/*; do
+    for f in "${CDSI_NGINX_SITE_DIR}"/* "${CDSI_NGINX_ENABLED_DIR}"/*; do
         [[ -f "$f" ]] || continue
         if grep -q "managed by Certbot" "$f" 2>/dev/null; then
             touched=1
@@ -359,7 +572,7 @@ _certbot_cleanup_nginx() {
 
     if [[ "$failed" -eq 0 ]] \
        && "${SUDO[@]}" nginx -t >/dev/null 2>&1 \
-       && "${SUDO[@]}" systemctl reload nginx >/dev/null 2>&1; then
+       && cdsi_service_reload "$CDSI_NGINX_SERVICE" >/dev/null 2>&1; then
         [[ -n "$backup_dir" ]] && "${SUDO[@]}" rm -rf -- "$backup_dir"
         log "  已移除 Nginx 中的 Certbot SSL 指令并重新加载。"
         return 0
@@ -383,7 +596,7 @@ _certbot_cleanup_nginx() {
         log_fail "回滚备份保留在: $backup_dir"
         return 1
     fi
-    if ! "${SUDO[@]}" systemctl reload nginx >/dev/null 2>&1; then
+    if ! cdsi_service_reload "$CDSI_NGINX_SERVICE" >/dev/null 2>&1; then
         log_fail "已恢复配置，但 Nginx 重新加载失败。"
         log_fail "回滚备份保留在: $backup_dir"
         return 1
@@ -392,10 +605,77 @@ _certbot_cleanup_nginx() {
     return 1
 }
 
+_certbot_cleanup_ip_tls() {
+    local tls_path="/etc/nginx/cdsi-wordpress-tls/ip.conf"
+    local backup=""
+    [[ -f "$tls_path" ]] || return 0
+    if [[ "$DRY_RUN" == true ]]; then
+        log_dry "将删除 Anchor IP TLS 配置: ${tls_path}"
+        return 0
+    fi
+
+    backup="$(mktemp "${TMPDIR:-/tmp}/cdsi-uninstall-ip-tls.XXXXXX")" \
+        || return 1
+    "${SUDO[@]}" cp -a -- "$tls_path" "$backup" \
+        || { rm -f -- "$backup"; return 1; }
+    "${SUDO[@]}" rm -f -- "$tls_path" \
+        || { rm -f -- "$backup"; return 1; }
+    if ! "${SUDO[@]}" nginx -t \
+       || ! cdsi_service_reload "$CDSI_NGINX_SERVICE"; then
+        "${SUDO[@]}" install -m 0644 "$backup" "$tls_path" 2>/dev/null || true
+        "${SUDO[@]}" nginx -t >/dev/null 2>&1 \
+            && cdsi_service_reload "$CDSI_NGINX_SERVICE" >/dev/null 2>&1 || true
+        rm -f -- "$backup"
+        return 1
+    fi
+    rm -f -- "$backup"
+}
+
+_certbot_restore_wordpress_http_url() {
+    local wp_dir="/var/www/wordpress"
+    local current_url="" current_siteurl="" http_url="" actual_home="" actual_siteurl=""
+    command -v wp >/dev/null 2>&1 || return 0
+    [[ -f "${wp_dir}/wp-load.php" ]] || return 0
+    current_url="$("${SUDO[@]}" wp --path="$wp_dir" option get home \
+        --allow-root 2>/dev/null || true)"
+    current_siteurl="$("${SUDO[@]}" wp --path="$wp_dir" option get siteurl \
+        --allow-root 2>/dev/null || true)"
+    [[ "$current_url" == https://* ]] || return 0
+    http_url="http://${current_url#https://}"
+    if [[ "$DRY_RUN" == true ]]; then
+        log_dry "将恢复 WordPress HTTP URL: ${http_url}"
+        return 0
+    fi
+    if ! "${SUDO[@]}" wp --path="$wp_dir" option update siteurl "$http_url" \
+            --allow-root >/dev/null \
+       || ! "${SUDO[@]}" wp --path="$wp_dir" option update home "$http_url" \
+            --allow-root >/dev/null; then
+        [[ -z "$current_siteurl" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update siteurl "$current_siteurl" --allow-root >/dev/null 2>&1 || true
+        [[ -z "$current_url" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update home "$current_url" --allow-root >/dev/null 2>&1 || true
+        return 1
+    fi
+    actual_siteurl="$("${SUDO[@]}" wp --path="$wp_dir" option get siteurl --allow-root 2>/dev/null || true)"
+    actual_home="$("${SUDO[@]}" wp --path="$wp_dir" option get home --allow-root 2>/dev/null || true)"
+    if [[ "${actual_siteurl%/}" != "${http_url%/}" \
+       || "${actual_home%/}" != "${http_url%/}" ]]; then
+        [[ -z "$current_siteurl" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update siteurl "$current_siteurl" --allow-root >/dev/null 2>&1 || true
+        [[ -z "$current_url" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update home "$current_url" --allow-root >/dev/null 2>&1 || true
+        return 1
+    fi
+}
+
 uninstall_certbot() {
     log "── 卸载 Certbot (SSL) ──"
+    if ! _certbot_restore_wordpress_http_url; then
+        log_fail "WordPress URL 未能恢复为 HTTP；Certbot 卸载已停止。"
+        return 1
+    fi
     if ! _certbot_cleanup_nginx; then
         log_fail "Certbot 卸载已停止；Nginx 配置未能安全清理。"
+        return 1
+    fi
+    if ! _certbot_cleanup_ip_tls; then
+        log_fail "IP TLS 配置未能安全移除；Certbot 卸载已停止。"
         return 1
     fi
     if command -v certbot >/dev/null 2>&1; then
@@ -412,6 +692,7 @@ uninstall_certbot() {
         do_rm /etc/letsencrypt
     fi
     stop_disable_svc certbot.timer
+    stop_disable_svc certbot-renew.timer
     purge_packages certbot python3-certbot-nginx
     log_ok "Certbot 已卸载 (证书与 Nginx SSL 指令已清理)。"
 }
@@ -422,16 +703,17 @@ uninstall_wordpress() {
     # Remove the Nginx site block — both the legacy 'wordpress' name and the
     # unified <domain>.conf produced by install-wordpress.sh.
     local d=""
-    d="$(cat "${CDSI_ROOT}/config/domain" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    d="$(read_anchor_domain)"
     for n in wordpress "${d}"; do
         [[ -z "$n" ]] && continue
-        do_rm "/etc/nginx/sites-available/${n}.conf"
-        do_rm "/etc/nginx/sites-enabled/${n}.conf"
-        do_rm "/etc/nginx/sites-available/${n}"
-        do_rm "/etc/nginx/sites-enabled/${n}"
+        do_rm "${CDSI_NGINX_SITE_DIR}/${n}.conf"
+        do_rm "${CDSI_NGINX_ENABLED_DIR}/${n}.conf"
+        do_rm "${CDSI_NGINX_SITE_DIR}/${n}"
+        do_rm "${CDSI_NGINX_ENABLED_DIR}/${n}"
     done
     if command -v nginx >/dev/null 2>&1 && [[ "$DRY_RUN" != true ]]; then
-        "${SUDO[@]}" nginx -t 2>/dev/null && "${SUDO[@]}" systemctl reload nginx 2>/dev/null || true
+        "${SUDO[@]}" nginx -t 2>/dev/null \
+            && cdsi_service_reload "$CDSI_NGINX_SERVICE" 2>/dev/null || true
     fi
     if ! drop_cdsi_database; then
         db_status="数据库/用户可能仍保留，请手动核对"
@@ -441,6 +723,8 @@ uninstall_wordpress() {
     do_rm "${PASS_DIR}/wordpress-beacon.pass"
     do_rm "${PASS_DIR}/wordpress-atlas.pass"
     do_rm /usr/local/bin/wp
+    remove_anchor_selinux_state \
+        || log_warn "部分 Anchor SELinux 状态未能回滚；记录文件已保留。"
     log_ok "WordPress 文件、站点配置、凭据与 wp-cli 已清理；${db_status}。"
 }
 
@@ -456,10 +740,10 @@ UNINSTALL_ORDER=(certbot wordpress php redis supervisor nginx mysql)
 is_installed() {
     case "$1" in
         nginx)     command -v nginx >/dev/null 2>&1 ;;
-        mysql)     command -v mysql >/dev/null 2>&1 || systemctl list-unit-files mysql.service >/dev/null 2>&1 ;;
+        mysql)     command -v mysql >/dev/null 2>&1 || cdsi_service_installed "$CDSI_DB_SERVICE" ;;
         php)       command -v php-fpm >/dev/null 2>&1 || command -v php >/dev/null 2>&1 ;;
-        redis)     command -v redis-server >/dev/null 2>&1 ;;
-        supervisor) command -v supervisord >/dev/null 2>&1 ;;
+        redis)     cdsi_is_ubuntu && command -v redis-server >/dev/null 2>&1 ;;
+        supervisor) cdsi_is_ubuntu && command -v supervisord >/dev/null 2>&1 ;;
         certbot)   command -v certbot >/dev/null 2>&1 ;;
         wordpress) [[ -d /var/www/wordpress ]] ;;
         *) return 1 ;;
@@ -470,7 +754,13 @@ is_installed() {
 comp_what() {
     case "$1" in
         nginx)     echo "nginx 包 + /etc/nginx 配置" ;;
-        mysql)     echo "mysql-server 包 + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass" ;;
+        mysql)
+            if cdsi_is_centos_stream; then
+                echo "${CDSI_DB_PACKAGE} 包 + Anchor 配置 /etc/my.cnf.d/zz-cdsi-anchor.cnf + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
+            else
+                echo "${CDSI_DB_PACKAGE} 包 + /etc/mysql 配置 + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
+            fi
+            ;;
         php)       echo "php-cli/php-fpm/扩展/php-common 全部包" ;;
         redis)     echo "所有已安装 redis* 包 + /etc/redis + /var/lib/redis + password/redis.pass" ;;
         supervisor) echo "supervisor 包 + /etc/supervisor" ;;
@@ -527,6 +817,8 @@ uninstall_all() {
         uninstall_one "$key" skip_confirm
     done
     autoremove
+    remove_anchor_epel \
+        || log_warn "Anchor 添加的 EPEL 仓库未能移除；记录文件已保留。"
     log_ok "全部 CDSI 组件已卸载。"
 }
 
@@ -567,7 +859,7 @@ CDSI Anchor uninstall.sh
   --dry-run   只打印将要执行的操作，不改动系统
   -h, --help  显示此帮助
 
-注意: 卸载器不跟踪 apt 包或证书由谁安装；它会按组件名清理全局包、
+注意: 卸载器不跟踪系统包或证书由谁安装；它会按组件名清理全局包、
        服务、配置与数据，只适用于专用 Anchor 节点。所选组件对应的
        password/*.pass 会被清理；config/domain 与 /etc/cdsi 会保留。
 EOF
@@ -590,6 +882,11 @@ done
 
 # ── Main ────────────────────────────────────────────────────
 main() {
+    if ! cdsi_platform_supported; then
+        log_fail "不支持的操作系统: ${CDSI_OS_PRETTY}。卸载器未做任何修改。"
+        log "Anchor 支持 Ubuntu Server 24.04/26.04 LTS 和 CentOS Stream 10。"
+        return 3
+    fi
     log "CDSI Uninstaller 启动。"
     if [[ "$DRY_RUN" == true ]]; then
         log_warn "DRY-RUN 模式：仅预览，不会修改系统。"

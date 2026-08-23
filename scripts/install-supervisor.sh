@@ -23,8 +23,14 @@ fail() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=../lib/platform.sh
+source "${CDSI_ROOT}/lib/platform.sh"
 # shellcheck source=../lib/apt.sh
 source "${CDSI_ROOT}/lib/apt.sh"
+cdsi_platform_init
+if ! cdsi_is_ubuntu || ! cdsi_platform_supported; then
+    fail "The standalone Supervisor installer supports Ubuntu 24.04/26.04 LTS only."
+fi
 
 # ── Root Check ─────────────────────────────────────────────
 if [[ "${EUID}" -eq 0 ]]; then

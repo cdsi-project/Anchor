@@ -223,24 +223,24 @@ A creator should eventually be able to migrate away from CDSI without losing the
 CDSI Anchor is currently in **M0 integration and hardening**. The installer
 version is **0.3.0**.
 
-The primary path now provisions a WordPress OpenWeb node on a supported Ubuntu
-Server:
+The primary path now provisions a WordPress OpenWeb node on supported Ubuntu
+Server and CentOS Stream releases:
 
 | Status | Scope |
 | --- | --- |
-| Implemented in `install.sh` | Preflight, Nginx, MySQL, PHP-FPM, Certbot, WordPress, final service/access report, and component uninstall |
-| Implemented support | System-default APT sources, bounded DPKG-lock retry, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
+| Implemented in `install.sh` | Preflight, Nginx, MySQL, PHP-FPM, Certbot, WordPress, domain/HTTPS configuration, final service/access report, and component uninstall |
+| Implemented support | Ubuntu APT and CentOS DNF/systemd routes, bounded package retries, strict domain DNS activation, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
 | Standalone only | Redis and Supervisor scripts remain available, but are hidden from the main menu and Install All flow |
 | Planned | Composer/CDSI Core deployment, the `cdsi` CLI, `cdsi doctor`, resume/update workflows, and complete server backup/restore |
 
 The supported fresh-install runtime is deliberately narrow:
 
 ```text
-OS           Ubuntu Server 24.04 LTS or 26.04 LTS
-Web          Nginx from the system default APT source
-Runtime      PHP-FPM from the system default APT source
-Database     MySQL
-SSL          Let's Encrypt / Certbot when a valid domain is available
+OS           Ubuntu Server 24.04/26.04 LTS or CentOS Stream 10
+Web          Nginx from the operating system's default source
+Runtime      PHP-FPM from the operating system's default source
+Database     MySQL (mysql-server on Ubuntu, mysql8.4-server on CentOS)
+SSL          Let's Encrypt / Certbot for a verified domain; explicit IP HTTPS when supported
 OpenWeb      WordPress
 Integration  CDSI Beacon WordPress Application Password
 ```
@@ -249,7 +249,7 @@ Integration  CDSI Beacon WordPress Application Password
 
 The project is currently focused on:
 
-- clean-server regression testing on both supported Ubuntu releases
+- clean-server regression testing on every supported OS route
 - safe reruns after partial installation
 - DNS, certificate, package-lock, and network failure recovery
 - uninstall safety and upgrade compatibility
@@ -279,6 +279,58 @@ The following are planned and should not be considered implemented by Anchor:
 
 ---
 
+## 安装前准备
+
+Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS** 和
+**CentOS Stream 10**。Debian 目录仅保留扩展边界，尚未实现安装支持。
+
+### 必需
+
+1. **一台干净的受支持 Linux 服务器**
+   - 支持 `x86_64` 和 `aarch64` 架构
+   - 最低 1 核 CPU、1 GB 内存和 10 GB 根分区可用空间；推荐 2 GB 内存和
+     20 GB 根分区可用空间
+   - 登录用户需要 root 或 sudo 权限
+   - 系统使用 systemd，以及 Ubuntu APT 或 CentOS DNF 默认软件源
+2. **稳定的公网入口和网络连接**
+   - 准备公网 IP
+   - 防火墙开放 80 端口和实际使用的 SSH 管理端口；启用 HTTPS 时再确保
+     443 端口开放。
+3. **交互式 SSH 终端**
+   - `install.sh` 使用交互菜单，不能通过无 TTY 的后台任务或管道运行。
+
+### 使用域名和 CDSI Beacon 时必需
+
+4. **一个能够管理 DNS 的域名**
+   - 使用裸域名，例如 `cdsi.com`，不要包含 `https://`、端口或路径。
+   - 所有 DNS A 记录都必须指向服务器公网 IPv4；如果存在 AAAA 记录，也必须
+     指向当前服务器实际配置的公网 IPv6。
+   - 等待 DNS 生效，并确保公网能够访问 80 端口，供 Let's Encrypt HTTP-01
+     验证使用。
+
+没有域名也可以安装。默认网站地址为 `http://<服务器公网 IP>`，WordPress 和
+Beacon Application Password 仍会创建。输入的域名只有在 A/AAAA 解析严格匹配
+本机后才会生效；未就绪的域名保存在 `config/domain.pending`，不会改动当前
+WordPress URL 或 Nginx 站点。
+
+公网 IP 也可以显式申请公信 HTTPS，但必须是公网 IPv4，且系统提供的 Certbot
+必须为 5.4 或更高版本并支持 Let's Encrypt `shortlived` profile。能力不足时
+Anchor 保持现有 HTTP 站点，不会安装不受信任证书，也不承诺 CentOS Stream
+当前系统包一定满足该版本要求。公网 IP 探测受限时可显式传入
+`CDSI_SERVER_IP`。
+
+### 建议
+
+- 优先使用干净、专用的服务器，不要与已有生产网站、数据库或共享运行时混用。
+- Ubuntu 安装前移除 nginx.org、Ondrej PHP/Nginx PPA 等冲突源；Anchor 不会
+  静默改写这些软件源。CentOS 基础栈使用 BaseOS/AppStream，并会在需要
+  Certbot 或可选 Imagick 时从 CentOS Extras 安装 `epel-release`。
+- 如果服务器已有业务数据或配置，先创建云盘快照，并备份 Nginx、PHP、MySQL
+  和 WordPress 数据。
+- 长时间安装可在 `tmux` 或 `screen` 会话中执行，避免 SSH 中断影响交互流程。
+
+---
+
 ## Installation Experience
 
 The current entry point is:
@@ -287,16 +339,6 @@ The current entry point is:
 git clone https://github.com/cdsi-project/Anchor.git
 cd Anchor
 sudo ./install.sh
-```
-
-The installer presents a component menu and can install all five visible
-components in dependency order. The future CLI remains planned:
-
-```bash
-cdsi install
-cdsi status
-cdsi doctor
-cdsi update
 ```
 
 The goal is to reduce infrastructure complexity so that owning an independent digital node does not require deep knowledge of Linux, Nginx, PHP, MySQL, SSL, or deployment.
@@ -316,6 +358,10 @@ Each script under `scripts/` can also be run independently for focused operation
 ```bash
 bash scripts/check-env.sh
 sudo bash scripts/configure.sh
+sudo bash scripts/configure-domain.sh example.com
+sudo bash scripts/configure-domain.sh --clear
+sudo bash scripts/configure-https.sh example.com
+sudo bash scripts/configure-https.sh --ip
 bash scripts/health.sh
 sudo bash scripts/install-nginx.sh
 sudo bash scripts/install-mysql.sh
@@ -324,18 +370,41 @@ sudo bash scripts/install-certbot.sh
 sudo bash scripts/install-wordpress.sh
 ```
 
+这些公开脚本会先检测操作系统，再路由到对应平台目录。
+`scripts/ubuntu/` 与 `scripts/centos-stream/` 已实现，并复用
+`scripts/common/` 中的组件实现；`scripts/debian/` 仍会在修改系统前明确返回
+“不支持”。Redis 与 Supervisor 独立脚本目前仅支持 Ubuntu。
+
 `check-env.sh` is the active preflight implementation. `configure.sh` is a
 standalone `/etc/cdsi` configuration helper that is not yet called by the main
 install flow. `health.sh` remains a visible placeholder for the future
 `cdsi doctor` workflow.
 
-The PHP installer uses the default PHP packages from the supported Ubuntu
-repositories. It does not add a third-party PHP PPA or replace an existing
-global PHP alternative. On a fresh supported installation it provisions Redis,
-GD, and OPcache extensions; Imagick is installed when an Ubuntu package is
-available. The fast path for a pre-existing PHP installation currently verifies
-PHP-FPM and `mysqli`, so administrators should verify any additional extensions
-needed by their site.
+`configure-domain.sh` and `configure-https.sh` are implemented standalone
+operations. Domain activation requires every A record, and every present AAAA
+record, to resolve only to this server. A failed check records
+`config/domain.pending` and leaves the current site unchanged. Without an
+active domain, installation stays at `http://<public IP>` until HTTPS is
+explicitly requested with `configure-https.sh --ip` and the local Certbot has
+the required IP-certificate capability.
+
+The HTTPS path uses Let's Encrypt by default. An operator may set
+`CDSI_ACME_FALLBACK_SERVER` for a secondary ACME directory; it is selected only
+when the primary directory itself is unreachable after bounded network probes.
+DNS, CAA, authorization, certificate-validation, and rate-limit failures never
+trigger an automatic CA switch. ZeroSSL additionally requires
+`CDSI_ACME_FALLBACK_EAB_KID` and `CDSI_ACME_FALLBACK_EAB_HMAC_KEY`.
+
+Nginx, MySQL, and PHP-FPM installers verify both the active runtime state and
+systemd boot enablement. When HTTPS is configured, the available
+`certbot.timer` or `certbot-renew.timer` must likewise be active and enabled.
+
+The PHP installer uses each supported operating system's default PHP stream. It
+does not add a PHP PPA/Remi repository or replace an existing global PHP
+alternative. A fresh installation provisions Redis, ZIP, GD, and OPcache;
+Imagick is optional and uses the system package on Ubuntu or EPEL on CentOS.
+The fast path verifies PHP-FPM and the complete required extension set before it
+skips reconciliation.
 
 ---
 
@@ -354,8 +423,19 @@ Anchor/
 ├── uninstall.sh
 ├── SHA256SUMS
 ├── config/
-├── lib/
+│   ├── domain            # 已验证且已生效的域名（本机生成）
+│   └── domain.pending    # DNS 未就绪的候选域名（本机生成）
+├── lib/                  # 平台、DNS、APT/DNF、systemd 与公共工具
 ├── scripts/
+│   ├── dispatch.sh       # 操作系统检测与路由
+│   ├── check-env.sh      # 可独立运行的公开入口
+│   ├── configure-domain.sh
+│   ├── configure-https.sh
+│   ├── install-*.sh      # 可独立运行的公开入口
+│   ├── common/           # 共享组件实现
+│   ├── ubuntu/           # 已实现的平台路由
+│   ├── debian/           # 规划边界，尚未实现
+│   └── centos-stream/    # 已实现的平台路由
 ├── templates/
 ├── tests/
 ├── docs/

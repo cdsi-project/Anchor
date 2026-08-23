@@ -14,7 +14,8 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 
 - 用户只需执行简单交互，即可快速配置Linux服务器环境
 - 安装 Nginx、MySQL、PHP、Wordpress等开源软件，无需额外付费
-- 自动配置 WordPress 作为 OpenWeb站点，自动配置HTTPS
+- 自动配置 WordPress 作为 OpenWeb 站点；域名验证通过后配置 HTTPS
+- 没有域名时保持 `http://<服务器 IP>`，后续可独立配置域名或显式尝试 IP HTTPS
 - 自动创建 WordPress 管理员和 [CDSI Beacon](https://github.com/cdsi-project/Beacon) 自动发布文章API
 
 当前默认组件：
@@ -31,8 +32,8 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 
 ## 安装
 
-支持 Ubuntu Server 24.04 LTS 和 26.04 LTS。主安装器需要 root/sudo 权限和
-交互式终端：
+支持 Ubuntu Server 24.04/26.04 LTS 和 CentOS Stream 10。主安装器需要
+root/sudo 权限和交互式终端：
 
 ```bash
 git clone https://github.com/cdsi-project/Anchor.git
@@ -42,8 +43,34 @@ sudo ./install.sh
 
 `install.sh` 是统一入口。`scripts/` 中的脚本也可独立运行
 
+公开组件脚本会检测操作系统并进入对应平台目录。Ubuntu 与 CentOS Stream 10
+路由已经实现；Debian 目录仅保留规划边界，尚不能用于安装。Redis 与 Supervisor
+独立脚本仍仅支持 Ubuntu。
+
 完整菜单、域名/SSL 配置、凭据位置、卸载风险和排错步骤见
 [INSTALL.md](INSTALL.md)。
+
+域名和 HTTPS 不需要重装基础服务，可以独立操作：
+
+```bash
+sudo bash scripts/configure-domain.sh example.com
+sudo bash scripts/configure-domain.sh --clear
+sudo bash scripts/configure-https.sh example.com
+sudo bash scripts/configure-https.sh --ip
+```
+
+新域名只有在所有 A 记录严格指向服务器公网 IPv4，且所有现存 AAAA 记录都
+属于本服务器时才会激活。解析未就绪时只保存到 `config/domain.pending`，不会
+修改当前 WordPress URL 或 Nginx 站点。
+
+IP 公信 HTTPS 需要公网 IPv4、系统 Certbot 5.4+ 和 Let's Encrypt
+`shortlived` profile；能力不足时保持 HTTP。Anchor 不承诺 CentOS Stream 10
+当前 EPEL Certbot 一定支持 IP 证书。
+
+可通过 `CDSI_ACME_FALLBACK_SERVER` 指定备用 CA，但只在主 ACME directory
+网络不可达时使用。DNS、CAA、授权、证书校验和限额错误不会自动切换；ZeroSSL
+还必须提供 `CDSI_ACME_FALLBACK_EAB_KID` 与
+`CDSI_ACME_FALLBACK_EAB_HMAC_KEY`。
 
 ## 安装结果
 
@@ -56,6 +83,10 @@ WordPress 登录用户和密码
 CDSI Beacon 源站域名、用户名和 Application Password
 ```
 
+没有活动域名时，网站地址显示为 `http://<服务器 IP>`。报告同时区分服务的
+Runtime 与 Boot 状态：Nginx、MySQL 和 PHP-FPM 必须同时 active/enabled；
+HTTPS 配置成功时 Certbot 续期 timer 也必须 active/enabled。
+
 凭据保存在仓库本机的 `password/` 目录并设置为 600 权限；
 Application Password 只在创建时返回，丢失后可在wordpress后台重新生成
 
@@ -66,7 +97,8 @@ Anchor 当前负责基础设施和 WordPress OpenWeb 节点的安装，不负责
 
 WordPress 自身提供文章管理、RSS 和 REST API；
 
-Anchor 可以运行在提供兼容 Ubuntu Server 的云服务器或自有主机上，但项目
+Anchor 可以运行在提供受支持 Ubuntu Server 或 CentOS Stream 的云服务器或
+自有主机上，但项目
 当前按操作系统版本验证安装路径，不对阿里云、腾讯云、AWS 等厂商分别作兼容
 认证，也不会调用云厂商专有 API。
 
@@ -83,7 +115,7 @@ Anchor 可以运行在提供兼容 Ubuntu Server 的云服务器或自有主机�
 
 M0 接下来聚焦：
 
-1. 在两种受支持的 Ubuntu LTS 上完成干净服务器回归测试。
+1. 在所有受支持操作系统路由上完成干净服务器回归测试。
 2. 验证重复安装、部分失败后重跑和系统重启。
 3. 加固 DNS、证书、网络和软件包锁异常的恢复路径。
 4. 验证升级兼容、卸载范围和数据恢复方案。
@@ -94,8 +126,11 @@ M0 接下来聚焦：
 
 ## 设计原则
 
-- 使用系统默认软件源，避免对第三方仓库形成隐式依赖。
+- 基础栈使用系统默认软件源；CentOS 仅为 Certbot 和可选 Imagick 显式启用
+  EPEL，不引入 Remi。
 - 安装脚本默认幂等，不重置已有凭据或覆盖用户数据。
+- 域名解析未确认、IP 证书能力不足或证书签发失败时保留可用的 HTTP 站点。
+- Nginx、MySQL、PHP-FPM 和已配置证书的续期 timer 都验证运行与开机自启。
 - 任何删除、覆盖或凭据轮换都必须显式确认并可审计。
 - 用户拥有域名、数据库、内容、配置和备份；CDSI 不形成新的数据孤岛。
 

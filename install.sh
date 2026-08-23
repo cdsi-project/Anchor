@@ -1,4 +1,9 @@
-#!/usr/bin/env bash
+#!/bin/sh
+if [ -z "${BASH_VERSION:-}" ]; then
+    _cdsi_entry_dir=$(CDPATH= cd "$(dirname "$0")" && pwd) || exit 1
+    exec /bin/sh "${_cdsi_entry_dir}/lib/bootstrap.sh" \
+        "${_cdsi_entry_dir}/$(basename "$0")" "$@"
+fi
 # Copyright 2026 激怒李维斯
 # SPDX-License-Identifier: Apache-2.0
 # ═══════════════════════════════════════════════════════════════
@@ -17,6 +22,16 @@ CDSI_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly CDSI_ROOT
 
 # ── Source Libraries ───────────────────────────────────────
+# shellcheck source=lib/platform.sh
+source "${CDSI_ROOT}/lib/platform.sh"
+# shellcheck source=lib/apt.sh
+source "${CDSI_ROOT}/lib/apt.sh"
+# shellcheck source=lib/dnf.sh
+source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=lib/packages.sh
+source "${CDSI_ROOT}/lib/packages.sh"
+# shellcheck source=lib/services.sh
+source "${CDSI_ROOT}/lib/services.sh"
 # shellcheck source=lib/common.sh
 source "${CDSI_ROOT}/lib/common.sh"
 # shellcheck source=lib/logger.sh
@@ -25,6 +40,15 @@ source "${CDSI_ROOT}/lib/logger.sh"
 source "${CDSI_ROOT}/lib/system.sh"
 # shellcheck source=lib/wordpress-access.sh
 source "${CDSI_ROOT}/lib/wordpress-access.sh"
+# shellcheck source=lib/domain.sh
+source "${CDSI_ROOT}/lib/domain.sh"
+
+cdsi_platform_init
+
+CDSI_ROOT_CMD=()
+if [[ "${EUID}" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+    CDSI_ROOT_CMD=(sudo)
+fi
 
 # Scripts under scripts/ are standalone commands. The installer invokes them
 # as subprocesses so direct execution and orchestrated execution use the same
@@ -33,6 +57,7 @@ source "${CDSI_ROOT}/lib/wordpress-access.sh"
 # ── Installer Metadata ─────────────────────────────────────
 readonly CDSI_INSTALLER_VERSION="$CDSI_VERSION"
 readonly CDSI_COMPONENT_NOT_IMPLEMENTED=3
+readonly CDSI_COMPONENT_DEFERRED=10
 readonly CDSI_PREFLIGHT_SCRIPT="${CDSI_ROOT}/scripts/check-env.sh"
 
 # ── Component Registry ─────────────────────────────────────
@@ -155,6 +180,11 @@ cdsi_install_component() {
             CDSI_CURRENT_STAGE="MENU"
             return 0
         fi
+        if [[ "$rc" -eq "$CDSI_COMPONENT_DEFERRED" ]]; then
+            log_warning "${name} configuration was deferred; the current HTTP site remains available."
+            CDSI_CURRENT_STAGE="MENU"
+            return 0
+        fi
         log_error "${name} installation failed (exit code ${rc})."
         return "$rc"
     fi
@@ -218,14 +248,20 @@ cdsi_post_install_report() {
 
     # ── 1. Service status ──
     printf "\n  %b服务状态 / Service Status%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
-    local svc state
+    local svc runtime_state boot_state
     local -a svc_list=()
-    svc_list+=( "nginx" )
+    svc_list+=( "$CDSI_NGINX_SERVICE" )
 
     # Detect the PHP-FPM service name (version-dependent).
     local fpm_svc=""
-    if command -v php >/dev/null 2>&1; then
-        fpm_svc="php$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)-fpm"
+    local fpm_version=""
+    fpm_version="$(cdsi_php_fpm_version 2>/dev/null || true)"
+    if [[ -n "$fpm_version" ]]; then
+        fpm_svc="$(cdsi_php_service_name \
+            "$fpm_version")"
+    fi
+    if [[ -z "$fpm_svc" && -n "${CDSI_PHP_FPM_SERVICE:-}" ]]; then
+        fpm_svc="$CDSI_PHP_FPM_SERVICE"
     fi
     if [[ -z "$fpm_svc" ]]; then
         fpm_svc="$(systemctl list-units --type=service --state=running --no-legend --no-pager 2>/dev/null \
@@ -238,27 +274,55 @@ cdsi_post_install_report() {
     # MySQL or MariaDB (whichever is installed) — detect by active/enabled
     # status rather than grepping list-unit-files (more robust across shells).
     local db_svc=""
-    for cand in mysql mariadb mysqld; do
-        if systemctl is-active --quiet "$cand" 2>/dev/null || systemctl is-enabled --quiet "$cand" 2>/dev/null; then
+    local cand
+    for cand in "$CDSI_MYSQL_SERVICE" mysql mariadb mysqld mysql-server; do
+        if cdsi_service_active "$cand" \
+            || cdsi_service_enabled "$cand"; then
             db_svc="$cand"
             break
         fi
     done
     [[ -n "$db_svc" ]] && svc_list+=( "$db_svc" )
+    printf "    %-18s %-14s %-14s\n" "Unit" "Runtime" "Boot"
     for svc in "${svc_list[@]}"; do
-        if command -v systemctl >/dev/null 2>&1; then
-            if systemctl is-active --quiet "$svc" 2>/dev/null; then
-                state="${CLR_GREEN}● active${CLR_RESET}"
-            elif systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-                state="${CLR_YELLOW}○ inactive${CLR_RESET}"
-            else
-                state="${CLR_DIM}· not installed${CLR_RESET}"
-            fi
+        if cdsi_service_active "$svc"; then
+            runtime_state="${CLR_GREEN}active${CLR_RESET}"
+        elif cdsi_service_installed "$svc"; then
+            runtime_state="${CLR_YELLOW}inactive${CLR_RESET}"
         else
-            state="${CLR_DIM}· unknown${CLR_RESET}"
+            runtime_state="${CLR_DIM}not installed${CLR_RESET}"
         fi
-        printf "    %-18s %b\n" "$svc" "$state"
+        if cdsi_service_enabled "$svc"; then
+            boot_state="${CLR_GREEN}enabled${CLR_RESET}"
+        elif cdsi_service_installed "$svc"; then
+            boot_state="${CLR_YELLOW}disabled${CLR_RESET}"
+        else
+            boot_state="${CLR_DIM}n/a${CLR_RESET}"
+        fi
+        printf "    %-18s %b%*s%b\n" "$svc" "$runtime_state" 8 "" "$boot_state"
     done
+
+    local timer_candidate=""
+    for cand in certbot.timer certbot-renew.timer; do
+        if systemctl list-unit-files --type=timer --no-legend "$cand" 2>/dev/null \
+            | awk -v unit="$cand" '$1 == unit {found=1} END {exit found ? 0 : 1}'; then
+            timer_candidate="$cand"
+            break
+        fi
+    done
+    if [[ -n "$timer_candidate" ]]; then
+        if systemctl is-active --quiet "$timer_candidate" 2>/dev/null; then
+            runtime_state="${CLR_GREEN}active${CLR_RESET}"
+        else
+            runtime_state="${CLR_YELLOW}inactive${CLR_RESET}"
+        fi
+        if systemctl is-enabled --quiet "$timer_candidate" 2>/dev/null; then
+            boot_state="${CLR_GREEN}enabled${CLR_RESET}"
+        else
+            boot_state="${CLR_YELLOW}disabled${CLR_RESET}"
+        fi
+        printf "    %-18s %b%*s%b\n" "$timer_candidate" "$runtime_state" 8 "" "$boot_state"
+    fi
 
     # Resolve the final site URL once for reachability and the final access block.
     local domain="${CDSI_DOMAIN:-}"
@@ -273,6 +337,12 @@ cdsi_post_install_report() {
         fi
     fi
     site_url="$(cdsi_resolve_wordpress_url "/var/www/wordpress" "$domain" "$fallback_url")"
+    if [[ -f "${CDSI_ROOT}/config/domain.pending" ]]; then
+        local pending_domain=""
+        pending_domain="$(cdsi_domain_state_read "${CDSI_ROOT}/config/domain.pending" 2>/dev/null || true)"
+        [[ -z "$pending_domain" ]] \
+            || printf "\n  %b待解析域名 / Pending Domain:%b %s\n" "${CLR_YELLOW}" "${CLR_RESET}" "$pending_domain"
+    fi
 
     # ── 2. Frontend reachability ──
     printf "\n  %b前台访问检查 / Frontend Check%b\n" "${CLR_CYAN}${CLR_BOLD}" "${CLR_RESET}"
@@ -323,6 +393,8 @@ cdsi_show_main_menu() {
     printf "  %b1%b  安装服务 - Install services\n" "${CLR_BOLD}" "${CLR_RESET}"
     printf "  %b2%b  卸载服务 - Uninstall services\n" "${CLR_BOLD}" "${CLR_RESET}"
     printf "  %b3%b  查看密码 - View passwords\n" "${CLR_BOLD}" "${CLR_RESET}"
+    printf "  %b4%b  配置域名 - Configure domain\n" "${CLR_BOLD}" "${CLR_RESET}"
+    printf "  %b5%b  配置 HTTPS - Configure HTTPS\n" "${CLR_BOLD}" "${CLR_RESET}"
     printf "  %bq%b  退出     - Quit\n" "${CLR_BOLD}" "${CLR_RESET}"
     log_separator
     printf "  %bEnter choice:%b " "${CLR_BLINK}" "${CLR_RESET}"
@@ -360,32 +432,107 @@ cdsi_run_install_flow() {
 
     # Domain prompt (optional) — drives the WordPress URL and the Certbot cert.
     # Saved to config/domain so standalone component runs also pick it up.
-    local CDSI_DOMAIN_FILE="${CDSI_ROOT}/config/domain"
+    local CDSI_DOMAIN_FILE="${CDSI_DOMAIN_FILE:-${CDSI_ROOT}/config/domain}"
+    local CDSI_PENDING_DOMAIN_FILE="${CDSI_PENDING_DOMAIN_FILE:-${CDSI_ROOT}/config/domain.pending}"
+    local _domain_from_active=false
     if [[ -z "${CDSI_DOMAIN:-}" ]] && [[ -f "$CDSI_DOMAIN_FILE" ]]; then
-        CDSI_DOMAIN="$(cat "$CDSI_DOMAIN_FILE" 2>/dev/null | head -1 | tr -d '[:space:]')"
+        CDSI_DOMAIN="$(cdsi_domain_state_read "$CDSI_DOMAIN_FILE" 2>/dev/null || true)"
+        _domain_from_active=true
     fi
 
+    local _normalized_domain=""
     if [[ -n "${CDSI_DOMAIN:-}" ]]; then
-        log_info "Using existing domain: ${CDSI_DOMAIN}"
-    else
-        printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BLINK}" "${CLR_RESET}"
-        local _domain_input=""
-        if ! read -r _domain_input; then
-            _domain_input=""
+        if _normalized_domain="$(cdsi_normalize_domain_list "$CDSI_DOMAIN")"; then
+            CDSI_DOMAIN="$_normalized_domain"
+            log_info "Using existing domain: ${CDSI_DOMAIN}"
+        else
+            log_warning "Ignoring an invalid domain value. Enter a DNS hostname such as cdsi.example.com."
+            CDSI_DOMAIN=""
         fi
-        if [[ -n "$_domain_input" ]]; then
-            CDSI_DOMAIN="$(printf '%s' "$_domain_input" | tr -d '[:space:]')"
-            mkdir -p "${CDSI_ROOT}/config"
-            printf '%s\n' "$CDSI_DOMAIN" > "$CDSI_DOMAIN_FILE"
-            log_info "Domain set: ${CDSI_DOMAIN} (saved to config/domain)"
+    fi
+    if [[ -z "${CDSI_DOMAIN:-}" ]]; then
+        local _domain_input=""
+        while true; do
+            printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BLINK}" "${CLR_RESET}"
+            if ! read -r _domain_input; then
+                _domain_input=""
+            fi
+            if [[ -z "$_domain_input" ]]; then
+                # An invalid persisted value must not be rediscovered by the
+                # standalone component subprocesses after the user chooses IP.
+                if [[ -f "$CDSI_DOMAIN_FILE" ]] \
+                   && ! rm -f "$CDSI_DOMAIN_FILE"; then
+                    log_error "Could not clear invalid persisted domain: ${CDSI_DOMAIN_FILE}"
+                    return 1
+                fi
+                CDSI_DOMAIN=""
+                break
+            fi
+            if ! _normalized_domain="$(cdsi_normalize_domain_list "$_domain_input")"; then
+                log_warning "Invalid domain. Use DNS hostnames only; paths, wildcards, IP addresses, and shell characters are not allowed."
+                continue
+            fi
+            CDSI_DOMAIN="$_normalized_domain"
+            break
+        done
+    fi
+
+    CDSI_DNS_VERIFIED=false
+    if [[ -n "${CDSI_DOMAIN:-}" ]]; then
+        local _server_ip=""
+        if ! cdsi_ensure_dns_tools; then
+            log_error "Could not install the system DNS query tool required for domain validation."
+            return 1
+        fi
+        _server_ip="$(cdsi_resolve_wordpress_server_ip "/var/www/wordpress" || true)"
+        if [[ -z "$_server_ip" ]]; then
+            log_error "Could not determine the public server IP for DNS validation."
+            return 1
+        fi
+        if cdsi_domain_dns_ready "$CDSI_DOMAIN" "$_server_ip"; then
+            CDSI_DNS_VERIFIED=true
+            if ! cdsi_domain_state_write "$CDSI_DOMAIN_FILE" "$CDSI_DOMAIN"; then
+                log_error "Could not save the verified domain: ${CDSI_DOMAIN_FILE}"
+                return 1
+            fi
+            rm -f -- "$CDSI_PENDING_DOMAIN_FILE"
+            if [[ "$CDSI_DNS_STATUS" == ready ]]; then
+                log_success "${CDSI_DNS_MESSAGE}"
+            else
+                log_warning "${CDSI_DNS_MESSAGE}"
+                log_warning "Continuing because CDSI_ALLOW_DNS_MISMATCH=true was explicitly set."
+            fi
+            log_info "Active domain: ${CDSI_DOMAIN}"
+        elif [[ "$_domain_from_active" == true \
+             && -f "/var/www/wordpress/wp-load.php" ]]; then
+            # Do not silently redirect an existing domain site back to its IP
+            # during a temporary resolver outage. Certificate issuance still
+            # performs its own strict DNS check and will be deferred.
+            log_warning "${CDSI_DNS_MESSAGE}"
+            log_warning "Keeping the previously active domain; HTTPS issuance will be deferred."
+            CDSI_DNS_VERIFIED=true
+        else
+            if ! cdsi_domain_state_write "$CDSI_PENDING_DOMAIN_FILE" "$CDSI_DOMAIN"; then
+                log_error "Could not save the pending domain: ${CDSI_PENDING_DOMAIN_FILE}"
+                return 1
+            fi
+            if [[ "$_domain_from_active" == true ]]; then
+                rm -f -- "$CDSI_DOMAIN_FILE" || {
+                    log_error "Could not demote the unresolved active domain: ${CDSI_DOMAIN_FILE}"
+                    return 1
+                }
+            fi
+            log_warning "${CDSI_DNS_MESSAGE}"
+            log_warning "Domain saved as pending; installation will remain reachable through the server IP."
+            CDSI_DOMAIN=""
         fi
     fi
     # Cert email: defaults to admin@<domain> (used by certbot for the ACME
     # account). Override with CDSI_CERT_EMAIL=you@example.com if needed.
     if [[ -z "${CDSI_CERT_EMAIL:-}" ]] && [[ -n "${CDSI_DOMAIN:-}" ]]; then
-        CDSI_CERT_EMAIL="admin@${CDSI_DOMAIN}"
+        CDSI_CERT_EMAIL="admin@${CDSI_DOMAIN%%,*}"
     fi
-    export CDSI_DOMAIN CDSI_CERT_EMAIL
+    export CDSI_DOMAIN CDSI_CERT_EMAIL CDSI_DNS_VERIFIED
 
     while true; do
         cdsi_show_menu
@@ -435,6 +582,11 @@ cdsi_run_install_flow() {
 main() {
     # ── Initialize ──
     CDSI_CURRENT_STAGE="INIT"
+    if ! cdsi_platform_supported; then
+        log_error "Unsupported operating system: ${CDSI_OS_PRETTY}."
+        log_info "Anchor supports Ubuntu Server 24.04/26.04 LTS and CentOS Stream 10."
+        exit "$CDSI_COMPONENT_NOT_IMPLEMENTED"
+    fi
     logger_init
     log_info "CDSI Installer v${CDSI_INSTALLER_VERSION} started."
     log_info "Log file: ${CDSI_LOG_FILE}"
@@ -533,6 +685,28 @@ main() {
                 if read -r -n1 -s _back 2>/dev/null; then
                     echo
                 fi
+                ;;
+            4)
+                CDSI_CURRENT_STAGE="CONFIGURE_DOMAIN"
+                local domain_rc=0
+                "${CDSI_ROOT_CMD[@]}" bash "${CDSI_ROOT}/scripts/configure-domain.sh" \
+                    || domain_rc=$?
+                if [[ "$domain_rc" -eq 10 ]]; then
+                    log_warning "Domain DNS is pending; the current site was left unchanged."
+                elif [[ "$domain_rc" -ne 0 ]]; then
+                    log_error "Domain configuration failed (exit code ${domain_rc})."
+                fi
+                CDSI_CURRENT_STAGE="MENU"
+                ;;
+            5)
+                CDSI_CURRENT_STAGE="CONFIGURE_HTTPS"
+                local https_rc=0
+                "${CDSI_ROOT_CMD[@]}" bash "${CDSI_ROOT}/scripts/configure-https.sh" \
+                    || https_rc=$?
+                if [[ "$https_rc" -ne 0 ]]; then
+                    log_error "HTTPS configuration failed or was deferred (exit code ${https_rc})."
+                fi
+                CDSI_CURRENT_STAGE="MENU"
                 ;;
             [qQ])
                 break

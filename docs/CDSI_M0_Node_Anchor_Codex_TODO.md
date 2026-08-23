@@ -12,8 +12,8 @@
 
 | 状态 | 内容 |
 | --- | --- |
-| 已实现 | 安装器骨架、日志与预检、Nginx、MySQL、PHP-FPM、WordPress、域名、Certbot、组件级幂等、最终访问信息、Beacon Application Password、卸载、APT 锁重试、CDN SHA-256 校验 |
-| 独立可用 | Redis、Supervisor；不进入主菜单和“安装全部” |
+| 已实现 | Ubuntu 24.04/26.04 与 CentOS Stream 10 路由、日志与预检、Nginx、MySQL、PHP-FPM、WordPress、域名、Certbot、组件级幂等、最终访问信息、Beacon Application Password、卸载、APT/DNF 重试、CDN SHA-256 校验 |
+| 独立可用 | Redis、Supervisor（仅 Ubuntu）；不进入主菜单和“安装全部” |
 | 部分实现 | `/etc/cdsi` 配置助手、整机集成验收、持久日志与故障恢复 |
 | 未实现 | Composer/CDSI Core 部署、`cdsi` CLI/doctor/update、断点续装、完整服务器备份恢复、队列 Worker |
 

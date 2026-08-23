@@ -33,8 +33,14 @@ fi
 # ── Paths ──────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CDSI_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=../lib/platform.sh
+source "${CDSI_ROOT}/lib/platform.sh"
 # shellcheck source=../lib/apt.sh
 source "${CDSI_ROOT}/lib/apt.sh"
+cdsi_platform_init
+if ! cdsi_is_ubuntu || ! cdsi_platform_supported; then
+    fail "The standalone Redis installer supports Ubuntu 24.04/26.04 LTS only."
+fi
 PASS_DIR="${CDSI_ROOT}/password"
 PASS_FILE="${PASS_DIR}/redis.pass"
 REDIS_CONF="/etc/redis/redis.conf"
@@ -42,7 +48,7 @@ REDIS_CONF="/etc/redis/redis.conf"
 # ── Password Generation (10-char alphanumeric) ─────────────
 generate_password() {
     local pw
-    pw="$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 10 || true)"
+    pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 10 || true)"
     [[ ${#pw} -eq 10 ]] || fail "Failed to generate 10-char password."
     echo "$pw"
 }

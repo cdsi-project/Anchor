@@ -3,12 +3,66 @@
 
 cdsi_resolve_wordpress_server_ip() {
     local server_ip="${CDSI_SERVER_IP:-}"
+    local wordpress_dir="${1:-/var/www/wordpress}"
+    local existing_url="" existing_host="" candidate="" url=""
 
+    if [[ -n "$server_ip" ]]; then
+        cdsi_is_ipv4 "$server_ip" || return 1
+        printf '%s' "$server_ip"
+        return 0
+    fi
+
+    if command -v wp >/dev/null 2>&1 \
+       && [[ -f "${wordpress_dir}/wp-load.php" ]]; then
+        existing_url="$(wp --path="$wordpress_dir" option get home \
+            --allow-root 2>/dev/null || true)"
+        case "$existing_url" in
+            http://*|https://*)
+                existing_host="${existing_url#*://}"
+                existing_host="${existing_host%%/*}"
+                existing_host="${existing_host%%:*}"
+                if cdsi_is_public_ipv4 "$existing_host"; then
+                    printf '%s' "$existing_host"
+                    return 0
+                fi
+                ;;
+        esac
+    fi
+
+    if declare -F get_public_ip >/dev/null 2>&1; then
+        server_ip="$(get_public_ip 2>/dev/null || true)"
+        [[ "$server_ip" != "unknown" ]] || server_ip=""
+    fi
     if [[ -z "$server_ip" ]] && command -v curl >/dev/null 2>&1; then
-        server_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+        for url in \
+            https://ip.3322.net \
+            https://api.ipify.org \
+            https://ipv4.icanhazip.com \
+            https://ifconfig.co/ip \
+            https://ifconfig.me/ip; do
+            candidate="$(curl -fsS --max-time 5 "$url" 2>/dev/null \
+                | tr -d '[:space:]' || true)"
+            if cdsi_is_public_ipv4 "$candidate"; then
+                server_ip="$candidate"
+                break
+            fi
+        done
     fi
     if [[ -z "$server_ip" ]]; then
-        server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        for candidate in $(hostname -I 2>/dev/null || true); do
+            if cdsi_is_public_ipv4 "$candidate"; then
+                server_ip="$candidate"
+                break
+            fi
+        done
+    fi
+    if [[ -z "$server_ip" && "${CDSI_ALLOW_PRIVATE_IP:-false}" == true ]]; then
+        for candidate in $(hostname -I 2>/dev/null || true); do
+            if cdsi_is_ipv4 "$candidate"; then
+                server_ip="$candidate"
+                break
+            fi
+        done
     fi
 
     printf '%s' "$server_ip"
@@ -19,11 +73,18 @@ cdsi_resolve_wordpress_url() {
     local domain="${2:-}"
     local fallback_url="${3:-}"
     local site_url=""
+    local certbot_config_dir="${CDSI_CERTBOT_CONFIG_DIR:-}"
+
+    [[ -n "$certbot_config_dir" ]] || certbot_config_dir="/etc/letsencrypt"
 
     domain="$(printf '%s' "$domain" | awk -F'[, ]' '{print $1}')"
 
     if [[ -n "$domain" ]]; then
-        if [[ -s "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
+        if [[ -s "${certbot_config_dir}/live/${domain}/fullchain.pem" ]] \
+           && command -v openssl >/dev/null 2>&1 \
+           && openssl x509 -checkend 86400 -noout \
+                -in "${certbot_config_dir}/live/${domain}/fullchain.pem" \
+                >/dev/null 2>&1; then
             site_url="https://${domain}"
         else
             site_url="http://${domain}"

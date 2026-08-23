@@ -145,13 +145,16 @@ The project is currently in:
 Current priority:
 
 > Make the implemented WordPress OpenWeb installation path reliable on clean
-> and partially configured supported Ubuntu servers.
+> and partially configured supported Ubuntu and CentOS Stream servers.
 
 The current working baseline already includes:
 
 - preflight, logging, and component orchestration in `install.sh`
 - Nginx, MySQL, PHP-FPM, Certbot, and WordPress installation
-- system-default APT sources and bounded DPKG-lock retry
+- Ubuntu APT and CentOS DNF package backends with bounded retry
+- system-default base stack packages and explicitly bounded EPEL use on CentOS
+- strict A/AAAA domain activation with separate active and pending state
+- standalone domain and HTTPS configuration, including capability-gated IP TLS
 - CDN SHA-256 verification
 - final site, WordPress administrator, and Beacon Application Password output
 - component and full uninstall workflows
@@ -181,11 +184,11 @@ Do not expand scope into these areas unless explicitly requested.
 The implemented default deployment stack is:
 
 ```text
-OS           Ubuntu Server 24.04 LTS or 26.04 LTS
+OS           Ubuntu Server 24.04/26.04 LTS or CentOS Stream 10
 Web          Nginx
 Runtime      PHP-FPM
 Database     MySQL
-SSL          Let's Encrypt / Certbot
+SSL          Let's Encrypt / Certbot for verified domains; explicit supported public IPs
 OpenWeb      WordPress
 Integration  CDSI Beacon WordPress Application Password
 ```
@@ -201,9 +204,20 @@ Planned          Composer, CDSI Core deployment, cdsi CLI/doctor
 
 The first version intentionally supports a narrow deployment path.
 
-Do NOT prematurely add support for:
+CentOS Stream 10 must keep these explicit boundaries:
 
-- CentOS
+- use BaseOS/AppStream for Nginx, MySQL 8.4, PHP-FPM, and required PHP modules
+- use EPEL only for Certbot and optional Imagick; never enable Remi
+- never disable SELinux; when it is enabled, add persistent, recorded WordPress policy state
+- modify firewalld only when it is active, and record the exact runtime or
+  permanent layer for every Anchor-added service
+- use `apache:apache` for WordPress/FPM ownership and the packaged Nginx socket ACL
+- keep Redis and Supervisor unavailable on the CentOS route
+
+Do NOT claim or prematurely implement support for:
+
+- CentOS Stream releases other than 10
+- CentOS Linux
 - Rocky Linux
 - AlmaLinux
 - arbitrary Debian variants
@@ -257,7 +271,7 @@ Do NOT put CDSI business logic into installation scripts.
 
 # 6. Installer Structure
 
-Current structure:
+Current installer structure:
 
 ```text
 Anchor/
@@ -266,31 +280,49 @@ Anchor/
 ├── SHA256SUMS
 ├── lib/
 │   ├── apt.sh
+│   ├── dnf.sh
+│   ├── domain.sh
+│   ├── bootstrap.sh
 │   ├── common.sh
 │   ├── logger.sh
+│   ├── packages.sh
+│   ├── platform.sh
+│   ├── services.sh
 │   ├── system.sh
 │   └── wordpress-access.sh
 ├── scripts/
-│   ├── check-env.sh
+│   ├── dispatch.sh
+│   ├── check-env.sh              # public dispatcher
+│   ├── install-*.sh              # public dispatchers
+│   ├── configure-domain.sh       # independent domain lifecycle
+│   ├── configure-https.sh        # independent domain/IP TLS lifecycle
+│   ├── common/                   # shared component implementations
+│   ├── ubuntu/                   # implemented platform route
+│   ├── debian/                   # planned boundary only
+│   ├── centos-stream/            # implemented platform route
 │   ├── configure.sh
-│   ├── health.sh
-│   └── install-*.sh
+│   └── health.sh
 ├── config/
-├── templates/
+├── templates/                     # includes Certbot deploy hook
 ├── tests/
 └── docs/
 ```
 
-`install.sh` owns user interaction and orchestration. Component implementation
-belongs under `scripts/`; shared primitives belong under `lib/`. Keep both
-layers small and responsibility-focused.
+`install.sh` owns user interaction and orchestration. Public component commands
+under `scripts/` detect the operating system and dispatch to a platform route.
+The `ubuntu/` and `centos-stream/` routes are implemented. Their wrappers invoke
+the shared implementations under `scripts/common/`; `debian/` reserves a future
+boundary and must return unsupported until explicitly implemented.
+Shared primitives belong under `lib/`. Keep these layers small and
+responsibility-focused.
 
 ---
 
 # 7. Script Convention
 
-Every script under `scripts/` must remain independently runnable. `install.sh`
-invokes component scripts as child processes and relies on their exit codes:
+Every public script directly under `scripts/` must remain independently
+runnable. `install.sh` invokes component scripts as child processes and relies
+on their exit codes:
 
 ```text
 0        component completed or was safely skipped
@@ -302,6 +334,10 @@ need when executed directly. Component scripts must inspect existing system
 state before making changes and verify the result they own.
 
 Never assume the server is always completely clean.
+
+`scripts/configure-domain.sh` and `scripts/configure-https.sh` are public,
+independently runnable lifecycle commands. Domain or certificate changes must
+not require reinstalling WordPress or the base services.
 
 ---
 
@@ -516,11 +552,9 @@ At minimum inspect:
 
 Do not modify the server before critical compatibility checks pass.
 
-The active preflight is `scripts/check-env.sh` and rejects Ubuntu releases other
-than 24.04/26.04. Nginx and PHP also repeat that guard when run independently.
-MySQL, Certbot, and WordPress standalone scripts currently assume the caller is
-already on a supported Ubuntu host; keep that limitation explicit until the
-guard is shared by every component.
+The active preflight is `scripts/check-env.sh` and accepts only Ubuntu
+24.04/26.04 or CentOS Stream 10 on `x86_64`/`aarch64`. Every default component
+script enforces the same platform guard when run independently.
 
 ---
 
@@ -548,6 +582,45 @@ Future application configuration such as `.env` must be generated or updated
 deliberately and safely.
 
 Existing configuration must not be destroyed without explicit reason.
+
+IP-mode WordPress installation must validate automatically discovered addresses
+as globally routable IPv4. Reuse an existing public WordPress IP URL before
+calling external discovery endpoints, reject private/reserved endpoint output,
+and require `CDSI_SERVER_IP` or an explicit private-IP opt-in when public
+detection is unavailable.
+
+Domain state has two meanings that must never be conflated:
+
+```text
+config/domain          DNS-verified and active
+config/domain.pending  requested but not safe to activate yet
+```
+
+Every requested domain must have at least one A record, and every returned A
+record must equal the server IPv4. AAAA is optional, but every returned AAAA
+record must belong to a global IPv6 configured on the server. If strict DNS
+verification fails, write the normalized request to `config/domain.pending`
+and leave the current WordPress URL and Nginx site unchanged. A fresh IP-mode
+installation remains available at `http://<server IP>`.
+
+Use `scripts/configure-domain.sh DOMAIN` to activate a verified domain and
+`scripts/configure-domain.sh --clear` to return to IP HTTP mode. Use
+`scripts/configure-https.sh [DOMAIN]` for domain TLS and
+`scripts/configure-https.sh --ip` only for an explicit public-IP request.
+
+Public IP certificates require a globally routable IPv4, system Certbot 5.4 or
+newer with both `--ip-address` and `--preferred-profile`, and the Let's Encrypt
+`shortlived` profile. If any capability is absent, preserve HTTP. Do not claim
+that the current CentOS Stream EPEL Certbot necessarily supports IP
+certificates, do not install an untrusted certificate as a substitute, and do
+not send IP certificate orders to a fallback CA.
+
+The optional `CDSI_ACME_FALLBACK_SERVER` is selected only when the primary ACME
+directory cannot be reached after bounded probes. It must never be selected in
+response to DNS, CAA, authorization, validation, account, or rate-limit errors.
+ZeroSSL fallback requires both `CDSI_ACME_FALLBACK_EAB_KID` and
+`CDSI_ACME_FALLBACK_EAB_HMAC_KEY`; EAB values are secrets and must not be
+persisted in repository files or logs.
 
 ---
 
@@ -605,13 +678,26 @@ If validation fails:
 
 Use templates where practical.
 
+Successful Nginx, MySQL, and PHP-FPM installation requires both an active
+runtime service and systemd boot enablement. Reconcile and verify both states on
+fresh installs and fast reruns. When a certificate is configured, the packaged
+`certbot.timer` or `certbot-renew.timer` must also be active and enabled; an
+absent or inactive renewal timer is a certificate-configuration failure, not a
+successful manual-renewal fallback.
+
+Certificate deployment must validate the issued SANs, expiry, and private-key
+match before changing WordPress or Nginx. Validate Nginx before reload and use a
+deploy hook so successful renewals safely reload Nginx.
+
 ---
 
 # 17. PHP Rules
 
-Use the metapackages available from the supported Ubuntu system repositories.
-Do not add third-party PHP PPAs, force a global PHP alternative, or assume a
-versioned package exists without resolving the system default PHP version.
+Use the default PHP stream available from the supported operating system. Do not
+add third-party PHP PPAs or Remi, force a global PHP alternative, or assume a
+versioned package exists without resolving the platform runtime. On CentOS,
+EPEL may be enabled only through the shared helper for packages that are not in
+BaseOS/AppStream; the current PHP use is optional Imagick.
 
 The fresh-install path requires the extensions used by WordPress and Beacon's
 OpenWeb workflow, including `mysqli`, cURL, XML, mbstring, ZIP, GD, Redis, and
@@ -666,6 +752,8 @@ Nginx
 PHP-FPM
 MySQL
 WordPress
+Nginx/MySQL/PHP-FPM runtime active and boot enabled
+Certbot renewal timer active and enabled when TLS is configured
 Redis/Supervisor when explicitly installed
 ```
 
@@ -703,7 +791,7 @@ Installer behavior must be tested against real or disposable Linux environments.
 Primary integration scenario:
 
 ```text
-Fresh Ubuntu Server
+Fresh supported Linux server
         ↓
 CDSI Installer
         ↓
@@ -725,11 +813,15 @@ Important scenarios:
 3. Server reboot.
 4. Existing Nginx.
 5. DNS not yet configured.
-6. Partial installation failure.
-7. Service unavailable.
-8. Incorrect configuration.
-9. Uninstall dry-run and confirmed uninstall.
-10. Future health/doctor behavior when implemented.
+6. Requested domain has a wrong A or AAAA record and remains pending.
+7. Domain is configured or cleared independently without reinstalling services.
+8. Public IP HTTPS on capable and incapable Certbot versions.
+9. Primary ACME directory is unreachable with and without an explicit fallback.
+10. Partial installation failure.
+11. Service unavailable or disabled at boot.
+12. Incorrect configuration.
+13. Uninstall dry-run and confirmed uninstall.
+14. Future health/doctor behavior when implemented.
 
 ---
 
@@ -747,7 +839,12 @@ Implemented:
 Preflight and logging
 Nginx / MySQL / PHP-FPM / Certbot / WordPress
 Domain-aware HTTP/HTTPS setup
-System-default APT package installation with bounded lock retry
+Strict A/AAAA activation with active/pending domain state
+Independent domain clear/activate and domain/IP HTTPS commands
+Directory-only ACME fallback and capability-gated short-lived IP certificates
+Active/enabled service and certificate-renewal timer verification
+APT/DNF package installation with bounded retry
+CentOS Stream 10 platform route with MySQL 8.4 and explicit EPEL boundaries
 Pinned SHA-256 verification for WP-CLI and WordPress downloads
 WordPress administrator and Beacon Application Password provisioning
 Final access report
@@ -769,7 +866,7 @@ cdsi CLI / doctor / update
 resume checkpoints
 complete server backup and restore
 automated fresh-server/reinstall/reboot integration coverage in this repository
-standalone platform-guard parity for MySQL, Certbot, and WordPress
+Debian component implementations
 ```
 
 Current work should prioritize clean-server regression testing, safe reruns,

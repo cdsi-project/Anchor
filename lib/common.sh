@@ -10,6 +10,17 @@
     exit 1
 }
 
+_CDSI_COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! declare -F cdsi_platform_init >/dev/null 2>&1; then
+    # shellcheck source=platform.sh
+    source "${_CDSI_COMMON_LIB_DIR}/platform.sh"
+fi
+if ! declare -F cdsi_service_active >/dev/null 2>&1; then
+    # shellcheck source=services.sh
+    source "${_CDSI_COMMON_LIB_DIR}/services.sh"
+fi
+cdsi_platform_init
+
 # ── CDSI Constants ──────────────────────────────────────────
 readonly CDSI_APP_NAME="CDSI"
 readonly CDSI_VERSION="0.3.0"
@@ -70,34 +81,36 @@ check_command() {
     return 1
 }
 
-# Check if a systemd service unit is installed.
+# Check if a systemd service is installed.
 # Usage: check_service_installed <service>
 # Returns: 0 if installed, 1 if not.
 check_service_installed() {
-    if systemctl list-unit-files "$1.service" >/dev/null 2>&1; then
-        return 0
-    fi
-    return 1
+    cdsi_service_installed "$1"
 }
 
 # Check if a systemd service is currently active.
 # Usage: check_service_active <service>
 # Returns: 0 if active, 1 if not.
 check_service_active() {
-    if systemctl is-active --quiet "$1" 2>/dev/null; then
-        return 0
-    fi
-    return 1
+    cdsi_service_active "$1"
 }
 
 # Check if a TCP port is available (not in use).
 # Usage: check_port_available <port>
 # Returns: 0 if available, 1 if in use.
 check_port_available() {
-    if ss -tlnH 2>/dev/null | grep -q ":$1 "; then
-        return 1
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        if ss -tlnH 2>/dev/null | awk -v suffix=":${port}" \
+            '$4 ~ suffix "$" { found=1 } END { exit found ? 0 : 1 }'; then
+            return 1
+        fi
     fi
     return 0
+}
+
+check_port_listening() {
+    ! check_port_available "$1"
 }
 
 # Check if the current user is root.
@@ -118,17 +131,108 @@ check_sudo() {
     return 1
 }
 
-# Get the public IP address of this server.
-# Outputs the IP to stdout, or "unknown" if detection fails.
+# Return success for a syntactically valid IPv4 address.
+cdsi_is_ipv4() {
+    local ip="${1:-}"
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    local a b c d
+    IFS=. read -r a b c d <<< "$ip"
+    local octet
+    for octet in "$a" "$b" "$c" "$d"; do
+        [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+        ((10#$octet <= 255)) || return 1
+    done
+}
+
+# Return success only for a globally routable IPv4 address.
+cdsi_is_public_ipv4() {
+    local ip="${1:-}"
+    cdsi_is_ipv4 "$ip" || return 1
+
+    local a b c d
+    IFS=. read -r a b c d <<< "$ip"
+
+    a=$((10#$a)); b=$((10#$b)); c=$((10#$c)); d=$((10#$d))
+    ((a != 0 && a != 10 && a != 127 && a < 224)) || return 1
+    ((a != 100 || b < 64 || b > 127)) || return 1
+    ((a != 169 || b != 254)) || return 1
+    ((a != 172 || b < 16 || b > 31)) || return 1
+    ((a != 192 || b != 0 || c != 0)) || return 1
+    ((a != 192 || b != 168)) || return 1
+    ((a != 192 || b != 0 || c != 2)) || return 1
+    ((a != 198 || b < 18 || b > 19)) || return 1
+    ((a != 198 || b != 51 || c != 100)) || return 1
+    ((a != 203 || b != 0 || c != 113)) || return 1
+}
+
+# Get the public IPv4 address of this server.
+# Outputs the address, or "unknown" if verified detection fails.
 get_public_ip() {
-    local ip=""
-    ip=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || true)
-    if [[ -z "$ip" ]]; then
-        ip=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || true)
+    local ip="" url
+    if command -v curl >/dev/null 2>&1; then
+        for url in \
+            https://ip.3322.net \
+            https://api.ipify.org \
+            https://ipv4.icanhazip.com \
+            https://ifconfig.co/ip \
+            https://ifconfig.me/ip; do
+            ip="$(curl -fsS --max-time 5 "$url" 2>/dev/null \
+                | tr -d '[:space:]' || true)"
+            if cdsi_is_public_ipv4 "$ip"; then
+                printf '%s\n' "$ip"
+                return 0
+            fi
+        done
     fi
-    if [[ -z "$ip" ]]; then
-        echo "unknown"
-    else
-        echo "$ip"
-    fi
+    printf 'unknown\n'
+    return 1
+}
+
+# Validate a public DNS hostname. IP literals, wildcards, paths, shell
+# metacharacters, underscores, and single-label hostnames are rejected.
+cdsi_validate_domain() {
+    local domain="${1:-}"
+    local label
+    local -a _cdsi_domain_labels=()
+
+    [[ -n "$domain" && ${#domain} -le 253 ]] || return 1
+    [[ "$domain" != *$'\n'* && "$domain" != *$'\r'* && "$domain" != *$'\t'* ]] \
+        || return 1
+    [[ "$domain" == *.* ]] || return 1
+    [[ ! "$domain" =~ ^[0-9.]+$ ]] || return 1
+    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
+
+    local IFS='.'
+    read -r -a _cdsi_domain_labels <<< "$domain"
+    for label in "${_cdsi_domain_labels[@]}"; do
+        [[ -n "$label" && ${#label} -le 63 ]] || return 1
+        [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] \
+            || return 1
+    done
+}
+
+# Normalize a comma/space-separated domain list. Outputs a canonical,
+# comma-separated lowercase list or returns non-zero without output.
+cdsi_normalize_domain_list() {
+    local raw="${1:-}"
+    local item normalized_item output=""
+    local -a items=()
+
+    [[ -n "$raw" ]] || return 1
+    [[ "$raw" != *$'\n'* && "$raw" != *$'\r'* && "$raw" != *$'\t'* ]] \
+        || return 1
+    raw="${raw//,/ }"
+    read -r -a items <<< "$raw"
+    [[ ${#items[@]} -gt 0 ]] || return 1
+
+    for item in "${items[@]}"; do
+        cdsi_validate_domain "$item" || return 1
+        normalized_item="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')"
+        if [[ -z "$output" ]]; then
+            output="$normalized_item"
+        elif [[ ",$output," != *",${normalized_item},"* ]]; then
+            output="${output},${normalized_item}"
+        fi
+    done
+    printf '%s\n' "$output"
 }

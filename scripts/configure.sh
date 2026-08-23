@@ -62,7 +62,7 @@ generate_secret() {
     local secret
     secret=$(head -c $(( length * 2 )) /dev/urandom 2>/dev/null | \
              base64 2>/dev/null | \
-             tr -dc 'A-Za-z0-9' 2>/dev/null | \
+             LC_ALL=C tr -dc 'A-Za-z0-9' 2>/dev/null | \
              head -c "${length}" || true)
     echo "${secret}"
 }
