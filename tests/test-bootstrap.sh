@@ -31,8 +31,17 @@ sh -n "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh has invalid POSIX shell syntax"
 grep -Fqx '#!/bin/sh' "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh must run before Bash is installed"
-grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.0"' "$BOOTSTRAP_SCRIPT" \
-    || fail_test "bootstrap is not pinned to the v0.3.0 release tag"
+grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.1"' "$BOOTSTRAP_SCRIPT" \
+    || fail_test "bootstrap is not pinned to the v0.3.1 release tag"
+bootstrap_release="$(
+    sed -n 's/^CDSI_BOOTSTRAP_REF="\([^"]*\)"$/\1/p' "$BOOTSTRAP_SCRIPT"
+)"
+installer_version="$(
+    sed -n 's/^readonly CDSI_VERSION="\([^"]*\)"$/\1/p' \
+        "${TEST_ROOT}/lib/common.sh"
+)"
+assert_equal "v${installer_version}" "$bootstrap_release" \
+    "bootstrap release and installer version diverged"
 posix_shell="$(command -v dash || command -v sh)"
 CDSI_BOOTSTRAP_SOURCE_ONLY=true "$posix_shell" -c '
     . "$1"
@@ -276,7 +285,7 @@ grep -Fq "$CDSI_BOOTSTRAP_GITEE_REPOSITORY" "$clone_log" \
     || fail_test "bootstrap did not try Gitee first"
 grep -Fq "$CDSI_BOOTSTRAP_GITHUB_REPOSITORY" "$clone_log" \
     || fail_test "bootstrap did not fall back to GitHub"
-grep -Fq 'cat-file -t refs/tags/v0.3.0' "$clone_log" \
+grep -Fq 'cat-file -t refs/tags/v0.3.1' "$clone_log" \
     || fail_test "bootstrap did not validate the release before accepting a mirror"
 
 failed_parent="${fixture_dir}/clone-failed"
@@ -448,7 +457,7 @@ grep -Fq "$CDSI_BOOTSTRAP_GITEE_REPOSITORY" "$fallback_update_log" \
 grep -Fq "$CDSI_BOOTSTRAP_GITHUB_REPOSITORY" "$fallback_update_log" \
     || fail_test "update did not try GitHub after invalid Gitee content"
 grep -Fq \
-    'refs/tags/v0.3.0:refs/cdsi-anchor/bootstrap-candidate' \
+    'refs/tags/v0.3.1:refs/cdsi-anchor/bootstrap-candidate' \
     "$fallback_update_log" \
     || fail_test "update fetched a candidate directly into the canonical tag ref"
 grep -Fq 'update-ref --no-deref -d refs/cdsi-anchor/bootstrap-candidate' \

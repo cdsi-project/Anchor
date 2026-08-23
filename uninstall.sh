@@ -388,6 +388,7 @@ uninstall_mysql() {
         purge_glob 'mysql8.4*'
         do_rm /etc/my.cnf.d/zz-cdsi-anchor.cnf
     elif cdsi_is_debian; then
+        # Anchor <= v0.3.0 installed this legacy meta-package.
         purge_glob 'default-mysql-server*'
         purge_glob 'mariadb-server*'
         purge_glob 'mariadb-client*'

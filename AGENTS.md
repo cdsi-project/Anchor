@@ -140,7 +140,7 @@ Infrastructure complexity should be pushed below the user-facing layer wherever 
 
 The project is currently in:
 
-# M0 — Anchor Installer v0.3.0 Integration and Hardening
+# M0 — Anchor Installer v0.3.1 Integration and Hardening
 
 Current priority:
 
@@ -220,8 +220,8 @@ CentOS Stream 10 must keep these explicit boundaries:
 Debian 13 must keep these explicit boundaries:
 
 - use the system default APT repositories for the base stack
-- install `default-mysql-server`, which resolves to MySQL-compatible MariaDB
-  11.8; use the `mariadb` service and MariaDB-compatible SQL
+- install `mariadb-server` directly from Debian's default repositories; use the
+  `mariadb` service and MariaDB-compatible SQL
 - keep the Anchor-owned bind configuration scoped to
   `/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf`; do not emit MySQL X settings or
   MySQL-only authentication clauses such as `caching_sha2_password`

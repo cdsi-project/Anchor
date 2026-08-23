@@ -6,7 +6,7 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 服务器基础设施安装工具，它把一台受支持的服务器配置为可访问的 OpenWeb(WordPress)
 节点。
 
-> 当前状态：M0 集成与加固，Installer v0.3.0。
+> 当前状态：M0 集成与加固，Installer v0.3.1。
 
 ## 当前实现
 
@@ -37,12 +37,12 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.1/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
 根目录 `bootstrap.sh` 会刷新系统默认源的元数据，安装 Git、Bash、curl、CA
-证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.0` 发布标签，
+证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.1` 发布标签，
 然后进入 `install.sh`。它不会改写软件源或执行全系统升级。
 
 已有 Git 时也可手动克隆：
@@ -58,8 +58,8 @@ sudo ./install.sh
 公开组件脚本会检测操作系统并进入对应平台目录。Ubuntu、Debian 13 与 CentOS
 Stream 10 路由均已实现；Redis 与 Supervisor 独立脚本仍仅支持 Ubuntu。
 
-Debian 13 使用系统默认源 `default-mysql-server` 提供的 MariaDB 11.8
-（MySQL-compatible），以及 PHP 8.4 和 Certbot 4.0。
+Debian 13 直接从系统默认源安装 MariaDB 11.8（`mariadb-server`，
+MySQL-compatible），以及 PHP 8.4 和 Certbot 4.0。
 
 完整菜单、域名/SSL 配置、凭据位置、卸载风险和排错步骤见
 [INSTALL.md](INSTALL.md)。

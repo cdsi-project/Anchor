@@ -138,7 +138,7 @@ assert_equal "/etc/nginx/sites-available" "$CDSI_NGINX_SITE_DIR" \
     "Debian Nginx site path"
 assert_equal "/etc/nginx/sites-enabled" "$CDSI_NGINX_ENABLED_DIR" \
     "Debian Nginx enabled path"
-assert_equal "default-mysql-server" "$CDSI_DB_PACKAGE" \
+assert_equal "mariadb-server" "$CDSI_DB_PACKAGE" \
     "Debian database package"
 assert_equal "mariadb" "$CDSI_DB_SERVICE" "Debian database service"
 assert_equal "mariadb" "$CDSI_DB_FLAVOR" "Debian database flavor"

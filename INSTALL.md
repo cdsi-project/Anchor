@@ -24,8 +24,8 @@
 
 Nginx、数据库和 PHP 基础栈使用操作系统默认软件源。Ubuntu/Debian 路径检测到
 nginx.org、Ondrej/Sury PHP 等冲突源时会停止并提示先移除，不会静默改写服务器
-的软件源。Debian 13 默认安装 `default-mysql-server` 提供的 MySQL-compatible
-MariaDB 11.8、PHP 8.4 和 Certbot 4.0。CentOS 路径不启用 Remi；Certbot 需要
+的软件源。Debian 13 直接安装系统默认源中的 `mariadb-server`（MariaDB 11.8，
+MySQL-compatible）、PHP 8.4 和 Certbot 4.0。CentOS 路径不启用 Remi；Certbot 需要
 EPEL，安装器只会从 CentOS
 Extras 安装 `epel-release`，并记录由 Anchor 添加的仓库状态。PHP 图片处理使用
 GD，不安装 Imagick。
@@ -38,7 +38,7 @@ GD，不安装 Imagick。
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.1/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -46,7 +46,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.0/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.1/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
@@ -55,7 +55,7 @@ wget -qO anchor-bootstrap.sh \
 1. 使用当前配置的系统默认源执行 APT metadata update 或 DNF
    `makecache --refresh`。
 2. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.0` Anchor
+3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.1` Anchor
    发布版到 `/opt/cdsi-anchor`。
 4. 启动 `install.sh` 交互菜单。
 
@@ -67,7 +67,7 @@ GitHub 引导地址：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.0/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.1/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 

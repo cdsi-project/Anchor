@@ -8,7 +8,7 @@
 > 当前事实以根目录 [README](../README.md)、[INSTALL](../INSTALL.md) 和
 > [AGENTS](../AGENTS.md) 为准；当前入口是 `sudo ./install.sh`。
 
-当前 M0 / Installer v0.3.0 进度：
+当前 M0 / Installer v0.3.1 进度：
 
 | 状态 | 内容 |
 | --- | --- |

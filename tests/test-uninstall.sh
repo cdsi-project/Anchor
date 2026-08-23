@@ -170,7 +170,7 @@ set_debian_fixture() {
     CDSI_NGINX_SERVICE="nginx"
     CDSI_NGINX_SITE_DIR="/etc/nginx/sites-available"
     CDSI_NGINX_ENABLED_DIR="/etc/nginx/sites-enabled"
-    CDSI_DB_PACKAGE="default-mysql-server"
+    CDSI_DB_PACKAGE="mariadb-server"
     CDSI_DB_SERVICE="mariadb"
     CDSI_DB_FLAVOR="mariadb"
     CDSI_MYSQL_PACKAGE="$CDSI_DB_PACKAGE"

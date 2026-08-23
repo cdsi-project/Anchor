@@ -114,8 +114,8 @@ assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
 init_platform_fixture debian 13 "Debian GNU/Linux" "Debian GNU/Linux 13"
 assert_equal "debian" "$CDSI_PLATFORM" "Debian platform"
 assert_equal "apt" "$CDSI_PACKAGE_BACKEND" "Debian package backend"
-assert_equal "default-mysql-server" "$CDSI_DB_PACKAGE" \
-    "Debian default database package"
+assert_equal "mariadb-server" "$CDSI_DB_PACKAGE" \
+    "Debian MariaDB package"
 assert_equal "mariadb" "$CDSI_DB_SERVICE" "Debian MariaDB service"
 assert_equal "mariadb" "$CDSI_DB_FLAVOR" "Debian database flavor"
 assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
