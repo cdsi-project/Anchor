@@ -513,7 +513,7 @@ Beacon Application Password
 CDSI Node
 ```
 
-当前 Anchor Installer v0.3.1 已实现这条五组件主流程。Redis 与 Supervisor
+当前 Anchor Installer v0.3.2 已实现这条五组件主流程。Redis 与 Supervisor
 脚本仍可独立运行，但暂不属于默认安装；CDSI Core、`cdsi` CLI/doctor 和完整
 服务器恢复仍是后续工作。
 
@@ -1134,7 +1134,7 @@ Beacon Application Password
 CDSI Node
 ```
 
-Anchor Installer v0.3.1 implements this five-component primary path. Redis and
+Anchor Installer v0.3.2 implements this five-component primary path. Redis and
 Supervisor remain independently runnable scripts but are not part of the
 default installation. CDSI Core, the `cdsi` CLI/doctor, and complete server
 recovery remain future work.

@@ -31,8 +31,8 @@ sh -n "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh has invalid POSIX shell syntax"
 grep -Fqx '#!/bin/sh' "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh must run before Bash is installed"
-grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.1"' "$BOOTSTRAP_SCRIPT" \
-    || fail_test "bootstrap is not pinned to the v0.3.1 release tag"
+grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.2"' "$BOOTSTRAP_SCRIPT" \
+    || fail_test "bootstrap is not pinned to the v0.3.2 release tag"
 bootstrap_release="$(
     sed -n 's/^CDSI_BOOTSTRAP_REF="\([^"]*\)"$/\1/p' "$BOOTSTRAP_SCRIPT"
 )"
@@ -42,6 +42,12 @@ installer_version="$(
 )"
 assert_equal "v${installer_version}" "$bootstrap_release" \
     "bootstrap release and installer version diverged"
+assert_equal "/usr/sbin:/usr/bin:/sbin:/bin" \
+    "$CDSI_BOOTSTRAP_SYSTEM_PATH" \
+    "bootstrap preparation PATH is not restricted to system tools"
+assert_equal "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    "$CDSI_BOOTSTRAP_INSTALLER_PATH" \
+    "bootstrap installer PATH does not expose local administrative tools"
 posix_shell="$(command -v dash || command -v sh)"
 CDSI_BOOTSTRAP_SOURCE_ONLY=true "$posix_shell" -c '
     . "$1"
@@ -285,7 +291,7 @@ grep -Fq "$CDSI_BOOTSTRAP_GITEE_REPOSITORY" "$clone_log" \
     || fail_test "bootstrap did not try Gitee first"
 grep -Fq "$CDSI_BOOTSTRAP_GITHUB_REPOSITORY" "$clone_log" \
     || fail_test "bootstrap did not fall back to GitHub"
-grep -Fq 'cat-file -t refs/tags/v0.3.1' "$clone_log" \
+grep -Fq "cat-file -t refs/tags/${CDSI_BOOTSTRAP_REF}" "$clone_log" \
     || fail_test "bootstrap did not validate the release before accepting a mirror"
 
 failed_parent="${fixture_dir}/clone-failed"
@@ -457,7 +463,7 @@ grep -Fq "$CDSI_BOOTSTRAP_GITEE_REPOSITORY" "$fallback_update_log" \
 grep -Fq "$CDSI_BOOTSTRAP_GITHUB_REPOSITORY" "$fallback_update_log" \
     || fail_test "update did not try GitHub after invalid Gitee content"
 grep -Fq \
-    'refs/tags/v0.3.1:refs/cdsi-anchor/bootstrap-candidate' \
+    "refs/tags/${CDSI_BOOTSTRAP_REF}:refs/cdsi-anchor/bootstrap-candidate" \
     "$fallback_update_log" \
     || fail_test "update fetched a candidate directly into the canonical tag ref"
 grep -Fq 'update-ref --no-deref -d refs/cdsi-anchor/bootstrap-candidate' \
@@ -539,6 +545,21 @@ assert_equal "1" "$(wc -l < "$handoff_log" | tr -d '[:space:]')" \
     "bootstrap invoked install.sh more than once"
 assert_equal "$handoff_dir" "$(tr -d '\r\n' < "$handoff_log")" \
     "bootstrap did not enter the Anchor checkout before handoff"
+
+exec_log="${fixture_dir}/exec.log"
+(
+    PATH="$CDSI_BOOTSTRAP_SYSTEM_PATH"
+    exec() {
+        printf '%s\n' "$PATH" > "$exec_log"
+        printf '%s\n' "$*" >> "$exec_log"
+    }
+    bootstrap_exec_installer
+)
+assert_equal "$CDSI_BOOTSTRAP_INSTALLER_PATH" \
+    "$(sed -n '1p' "$exec_log")" \
+    "bootstrap did not expose /usr/local/bin to install.sh"
+grep -Fq './install.sh' "$exec_log" \
+    || fail_test "bootstrap did not execute install.sh during handoff"
 
 if grep -Eq 'reset[[:space:]]+--hard|checkout[[:space:]]+-f' "$BOOTSTRAP_SCRIPT"; then
     fail_test "bootstrap contains a destructive Git update"

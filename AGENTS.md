@@ -140,7 +140,7 @@ Infrastructure complexity should be pushed below the user-facing layer wherever 
 
 The project is currently in:
 
-# M0 — Anchor Installer v0.3.1 Integration and Hardening
+# M0 — Anchor Installer v0.3.2 Integration and Hardening
 
 Current priority:
 

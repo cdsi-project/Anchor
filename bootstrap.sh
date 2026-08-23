@@ -6,7 +6,9 @@
 set -eu
 umask 077
 
-PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+CDSI_BOOTSTRAP_SYSTEM_PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+CDSI_BOOTSTRAP_INSTALLER_PATH="/usr/local/sbin:/usr/local/bin:${CDSI_BOOTSTRAP_SYSTEM_PATH}"
+PATH="$CDSI_BOOTSTRAP_SYSTEM_PATH"
 export PATH
 
 CDSI_BOOTSTRAP_RETRY_ATTEMPTS="${CDSI_BOOTSTRAP_RETRY_ATTEMPTS:-3}"
@@ -15,7 +17,7 @@ CDSI_BOOTSTRAP_PACKAGE_TIMEOUT="${CDSI_BOOTSTRAP_PACKAGE_TIMEOUT:-900}"
 CDSI_BOOTSTRAP_GIT_TIMEOUT="${CDSI_BOOTSTRAP_GIT_TIMEOUT:-300}"
 CDSI_BOOTSTRAP_GITEE_REPOSITORY="https://gitee.com/cdsi/anchor.git"
 CDSI_BOOTSTRAP_GITHUB_REPOSITORY="https://github.com/cdsi-project/Anchor.git"
-CDSI_BOOTSTRAP_REF="v0.3.1"
+CDSI_BOOTSTRAP_REF="v0.3.2"
 CDSI_BOOTSTRAP_BRANCH="anchor-bootstrap"
 CDSI_BOOTSTRAP_CANDIDATE_REF="refs/cdsi-anchor/bootstrap-candidate"
 CDSI_BOOTSTRAP_DIR="${CDSI_ANCHOR_DIR:-/opt/cdsi-anchor}"
@@ -549,7 +551,11 @@ bootstrap_start_installer() {
 }
 
 bootstrap_exec_installer() {
-    exec bash ./install.sh
+    bootstrap_bash="$(command -v bash)" \
+        || bootstrap_fail "Bash is unavailable after bootstrap preparation."
+    PATH="$CDSI_BOOTSTRAP_INSTALLER_PATH"
+    export PATH
+    exec "$bootstrap_bash" ./install.sh
 }
 
 bootstrap_main() {

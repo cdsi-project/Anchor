@@ -7,6 +7,9 @@ TEST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../install.sh
 source "${TEST_ROOT}/install.sh"
 
+grep -Fq 'if logger_run_component env \' "${TEST_ROOT}/install.sh" \
+    || { printf 'FAIL: component execution bypasses diagnostic logging\n' >&2; exit 1; }
+
 component_calls=()
 cdsi_install_component() {
     local idx="$1"

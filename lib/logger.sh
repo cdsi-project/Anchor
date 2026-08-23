@@ -37,6 +37,35 @@ _logger_write_file() {
     fi
 }
 
+# Relay component diagnostics in real time and persist only stderr. Component
+# stdout can contain credentials intended for the current terminal session.
+_logger_relay_component_stderr() {
+    local line=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        printf '%s\n' "$line" >&2
+        _logger_write_file "COMPONENT" "$line"
+    done
+}
+
+# Run a component without changing its exit status. stderr is copied to the
+# terminal and install log; stdout remains terminal-only to avoid secret leaks.
+logger_run_component() {
+    local stderr_fd relay_pid
+    local rc=0
+
+    if [[ "${CDSI_LOG_WRITABLE}" != true ]]; then
+        "$@" || rc=$?
+        return "$rc"
+    fi
+
+    exec {stderr_fd}> >(_logger_relay_component_stderr)
+    relay_pid=$!
+    "$@" 2>&"$stderr_fd" || rc=$?
+    exec {stderr_fd}>&-
+    wait "$relay_pid" || true
+    return "$rc"
+}
+
 # ── Public Logging Functions ───────────────────────────────
 
 log_info() {

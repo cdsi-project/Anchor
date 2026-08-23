@@ -43,6 +43,14 @@ log_warn() { printf '%b[WARN]%b %s\n' "$CLR_YELLOW" "$CLR_RESET" "$*" >&2; retur
 log_fail() { printf '%b[FAIL]%b %s\n' "$CLR_RED" "$CLR_RESET" "$*" >&2; }
 log_dry()  { printf '%b[DRY]%b %s\n' "$CLR_DIM" "$CLR_RESET" "$*"; }
 
+cdsi_wp_cli_path() {
+    if [[ -x /usr/local/bin/wp ]]; then
+        printf '%s\n' /usr/local/bin/wp
+        return 0
+    fi
+    command -v wp 2>/dev/null
+}
+
 # ── Resolve installer root & root/sudo ─────────────────────
 CDSI_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly CDSI_ROOT
@@ -646,11 +654,12 @@ _certbot_cleanup_ip_tls() {
 _certbot_restore_wordpress_http_url() {
     local wp_dir="/var/www/wordpress"
     local current_url="" current_siteurl="" http_url="" actual_home="" actual_siteurl=""
-    command -v wp >/dev/null 2>&1 || return 0
+    local wp_cli=""
+    wp_cli="$(cdsi_wp_cli_path)" || return 0
     [[ -f "${wp_dir}/wp-load.php" ]] || return 0
-    current_url="$("${SUDO[@]}" wp --path="$wp_dir" option get home \
+    current_url="$("${SUDO[@]}" "$wp_cli" --path="$wp_dir" option get home \
         --allow-root 2>/dev/null || true)"
-    current_siteurl="$("${SUDO[@]}" wp --path="$wp_dir" option get siteurl \
+    current_siteurl="$("${SUDO[@]}" "$wp_cli" --path="$wp_dir" option get siteurl \
         --allow-root 2>/dev/null || true)"
     [[ "$current_url" == https://* ]] || return 0
     http_url="http://${current_url#https://}"
@@ -658,20 +667,20 @@ _certbot_restore_wordpress_http_url() {
         log_dry "将恢复 WordPress HTTP URL: ${http_url}"
         return 0
     fi
-    if ! "${SUDO[@]}" wp --path="$wp_dir" option update siteurl "$http_url" \
+    if ! "${SUDO[@]}" "$wp_cli" --path="$wp_dir" option update siteurl "$http_url" \
             --allow-root >/dev/null \
-       || ! "${SUDO[@]}" wp --path="$wp_dir" option update home "$http_url" \
+       || ! "${SUDO[@]}" "$wp_cli" --path="$wp_dir" option update home "$http_url" \
             --allow-root >/dev/null; then
-        [[ -z "$current_siteurl" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update siteurl "$current_siteurl" --allow-root >/dev/null 2>&1 || true
-        [[ -z "$current_url" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update home "$current_url" --allow-root >/dev/null 2>&1 || true
+        [[ -z "$current_siteurl" ]] || "${SUDO[@]}" "$wp_cli" --path="$wp_dir" option update siteurl "$current_siteurl" --allow-root >/dev/null 2>&1 || true
+        [[ -z "$current_url" ]] || "${SUDO[@]}" "$wp_cli" --path="$wp_dir" option update home "$current_url" --allow-root >/dev/null 2>&1 || true
         return 1
     fi
-    actual_siteurl="$("${SUDO[@]}" wp --path="$wp_dir" option get siteurl --allow-root 2>/dev/null || true)"
-    actual_home="$("${SUDO[@]}" wp --path="$wp_dir" option get home --allow-root 2>/dev/null || true)"
+    actual_siteurl="$("${SUDO[@]}" "$wp_cli" --path="$wp_dir" option get siteurl --allow-root 2>/dev/null || true)"
+    actual_home="$("${SUDO[@]}" "$wp_cli" --path="$wp_dir" option get home --allow-root 2>/dev/null || true)"
     if [[ "${actual_siteurl%/}" != "${http_url%/}" \
        || "${actual_home%/}" != "${http_url%/}" ]]; then
-        [[ -z "$current_siteurl" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update siteurl "$current_siteurl" --allow-root >/dev/null 2>&1 || true
-        [[ -z "$current_url" ]] || "${SUDO[@]}" wp --path="$wp_dir" option update home "$current_url" --allow-root >/dev/null 2>&1 || true
+        [[ -z "$current_siteurl" ]] || "${SUDO[@]}" "$wp_cli" --path="$wp_dir" option update siteurl "$current_siteurl" --allow-root >/dev/null 2>&1 || true
+        [[ -z "$current_url" ]] || "${SUDO[@]}" "$wp_cli" --path="$wp_dir" option update home "$current_url" --allow-root >/dev/null 2>&1 || true
         return 1
     fi
 }

@@ -10,6 +10,27 @@
     exit 1
 }
 
+# Anchor installs administrative tools such as wp-cli under /usr/local. Keep
+# those tools ahead of distribution binaries while preserving caller paths.
+_cdsi_prepend_path_once() {
+    local directory="$1"
+    local entry=""
+    local normalized="$directory"
+    local -a path_entries=()
+
+    IFS=: read -r -a path_entries <<< "${PATH:-}"
+    for entry in "${path_entries[@]}"; do
+        [[ -n "$entry" && "$entry" != "$directory" ]] || continue
+        normalized="${normalized}:${entry}"
+    done
+    PATH="$normalized"
+}
+
+_cdsi_prepend_path_once /usr/local/bin
+_cdsi_prepend_path_once /usr/local/sbin
+unset -f _cdsi_prepend_path_once
+export PATH
+
 _CDSI_COMMON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! declare -F cdsi_platform_init >/dev/null 2>&1; then
     # shellcheck source=platform.sh
@@ -23,7 +44,7 @@ cdsi_platform_init
 
 # ── CDSI Constants ──────────────────────────────────────────
 readonly CDSI_APP_NAME="CDSI"
-readonly CDSI_VERSION="0.3.1"
+readonly CDSI_VERSION="0.3.2"
 
 readonly CDSI_CONFIG_DIR="/etc/cdsi"
 readonly CDSI_APP_DIR="/var/www/cdsi"

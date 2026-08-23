@@ -172,7 +172,8 @@ cdsi_install_component() {
 
     CDSI_CURRENT_STAGE="INSTALL_${name^^}"
     log_info "Installing ${name}..."
-    if env CDSI_INSTALL_CONTEXT="$install_context" bash "$script"; then
+    if logger_run_component env \
+        CDSI_INSTALL_CONTEXT="$install_context" bash "$script"; then
         CDSI_COMP_DONE[$idx]=true
         log_success "${name} installation complete."
         CDSI_CURRENT_STAGE="MENU"

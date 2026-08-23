@@ -38,7 +38,7 @@ GD，不安装 Imagick。
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.1/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -46,7 +46,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.1/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
@@ -55,7 +55,7 @@ wget -qO anchor-bootstrap.sh \
 1. 使用当前配置的系统默认源执行 APT metadata update 或 DNF
    `makecache --refresh`。
 2. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.1` Anchor
+3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.2` Anchor
    发布版到 `/opt/cdsi-anchor`。
 4. 启动 `install.sh` 交互菜单。
 
@@ -67,7 +67,7 @@ GitHub 引导地址：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.1/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.2/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -613,6 +613,10 @@ Anchor/
 ## 10. 日志与排错
 
 安装日志：`/var/log/cdsi/install.log`
+
+主安装器会实时保存组件的标准错误输出，便于保留具体失败原因；组件标准输出
+仍只显示在当前终端，因为数据库、WordPress 和 Beacon 凭据可能通过该通道
+展示，不会写入持久安装日志。
 
 ```bash
 # 查看最近安装日志

@@ -221,7 +221,7 @@ A creator should eventually be able to migrate away from CDSI without losing the
 ## Current Status
 
 CDSI Anchor is currently in **M0 integration and hardening**. The installer
-version is **0.3.1**.
+version is **0.3.2**.
 
 The primary path now provisions a WordPress OpenWeb node on supported Ubuntu
 Server, Debian, and CentOS Stream releases:
@@ -342,7 +342,7 @@ HTTPS，但不满足 IP 证书所需的 Certbot 5.4+ 能力。公网 IP 探测�
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.1/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -350,7 +350,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.1/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
@@ -359,7 +359,7 @@ wget -qO anchor-bootstrap.sh \
 1. 检查操作系统、CPU 架构、systemd、root/sudo 权限和交互终端。
 2. 刷新当前系统默认 APT/DNF 仓库的元数据，不改写软件源、不执行全系统升级。
 3. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-4. 优先从 Gitee 克隆经过 annotated tag 固定的 `v0.3.1` 发布版，失败时尝试
+4. 优先从 Gitee 克隆经过 annotated tag 固定的 `v0.3.2` 发布版，失败时尝试
    GitHub，默认保存到 `/opt/cdsi-anchor`。
 5. 自动进入 `install.sh` 的交互菜单。
 
@@ -370,7 +370,7 @@ GitHub 下载入口：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.1/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.2/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -674,6 +674,6 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 ## Status
 
-**M0 integration and hardening / Anchor Installer v0.3.1**
+**M0 integration and hardening / Anchor Installer v0.3.2**
 
 CDSI is under active development and is not yet ready for production use.
