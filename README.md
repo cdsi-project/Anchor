@@ -292,8 +292,8 @@ Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS** 和
      20 GB 根分区可用空间
    - 登录用户需要 root 或 sudo 权限
    - 系统使用 systemd，以及 Ubuntu APT 或 CentOS DNF 默认软件源
-   - 需要使用 `git` 获取 Anchor 源码；CentOS Stream 10 默认未安装 Git，
-     请先运行 `sudo dnf install -y git`
+   - CentOS Stream 10 需要先更新系统、启用 EPEL 并安装 Git，完整命令见下方
+     “Installation Experience”
 2. **稳定的公网入口和网络连接**
    - 准备公网 IP
    - 防火墙开放 80 端口和实际使用的 SSH 管理端口；启用 HTTPS 时再确保
@@ -337,9 +337,12 @@ Anchor 保持现有 HTTP 站点，不会安装不受信任证书，也不承诺 
 
 The current entry point is:
 
-CentOS Stream 10 需要先通过系统默认源安装 Git：
+CentOS Stream 10 需要先通过系统默认源完成安装前准备：
 
 ```bash
+sudo dnf update -y
+sudo dnf install epel-release -y
+sudo dnf update -y
 sudo dnf install -y git
 ```
 
