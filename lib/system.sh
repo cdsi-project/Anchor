@@ -23,6 +23,7 @@ cdsi_platform_init
 get_os_name() {
     case "$CDSI_PLATFORM" in
         ubuntu) printf 'Ubuntu\n' ;;
+        debian) printf 'Debian\n' ;;
         centos-stream) printf 'CentOS Stream\n' ;;
         *) printf '%s\n' "${CDSI_PLATFORM:-unknown}" ;;
     esac

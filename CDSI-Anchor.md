@@ -13,7 +13,7 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 默认安装流程已经实现：
 
 - 用户只需执行简单交互，即可快速配置Linux服务器环境
-- 安装 Nginx、MySQL、PHP、Wordpress等开源软件，无需额外付费
+- 安装 Nginx、MySQL/MariaDB、PHP、Wordpress等开源软件，无需额外付费
 - 自动配置 WordPress 作为 OpenWeb 站点；域名验证通过后配置 HTTPS
 - 没有域名时保持 `http://<服务器 IP>`，后续可独立配置域名或显式尝试 IP HTTPS
 - 自动创建 WordPress 管理员和 [CDSI Beacon](https://github.com/cdsi-project/Beacon) 自动发布文章API
@@ -23,7 +23,7 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 | 组件 | 入口 | 状态 |
 | --- | --- | --- |
 | Nginx | `scripts/install-nginx.sh` | 默认安装 |
-| MySQL | `scripts/install-mysql.sh` | 默认安装 |
+| MySQL/MariaDB | `scripts/install-mysql.sh` | 默认安装，按平台选择系统包 |
 | PHP-FPM | `scripts/install-php.sh` | 默认安装 |
 | Certbot | `scripts/install-certbot.sh` | 默认安装 |
 | WordPress | `scripts/install-wordpress.sh` | 默认安装 |
@@ -32,8 +32,16 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 
 ## 安装
 
-支持 Ubuntu Server 24.04/26.04 LTS 和 CentOS Stream 10。主安装器需要
-root/sudo 权限和交互式终端：
+支持 Ubuntu Server 24.04/26.04 LTS、Debian 13 和 CentOS Stream 10。主安装器
+需要 root/sudo 权限和交互式终端。Debian 13 最小化系统应先准备 Git 和 CA
+证书：
+
+```bash
+sudo apt update
+sudo apt install -y git ca-certificates
+```
+
+然后克隆并运行安装器：
 
 ```bash
 git clone https://github.com/cdsi-project/Anchor.git
@@ -43,9 +51,11 @@ sudo ./install.sh
 
 `install.sh` 是统一入口。`scripts/` 中的脚本也可独立运行
 
-公开组件脚本会检测操作系统并进入对应平台目录。Ubuntu 与 CentOS Stream 10
-路由已经实现；Debian 目录仅保留规划边界，尚不能用于安装。Redis 与 Supervisor
-独立脚本仍仅支持 Ubuntu。
+公开组件脚本会检测操作系统并进入对应平台目录。Ubuntu、Debian 13 与 CentOS
+Stream 10 路由均已实现；Redis 与 Supervisor 独立脚本仍仅支持 Ubuntu。
+
+Debian 13 使用系统默认源 `default-mysql-server` 提供的 MariaDB 11.8
+（MySQL-compatible），以及 PHP 8.4 和 Certbot 4.0。
 
 完整菜单、域名/SSL 配置、凭据位置、卸载风险和排错步骤见
 [INSTALL.md](INSTALL.md)。
@@ -65,7 +75,8 @@ sudo bash scripts/configure-https.sh --ip
 
 IP 公信 HTTPS 需要公网 IPv4、系统 Certbot 5.4+ 和 Let's Encrypt
 `shortlived` profile；能力不足时保持 HTTP。Anchor 不承诺 CentOS Stream 10
-当前 EPEL Certbot 一定支持 IP 证书。
+当前 EPEL Certbot 一定支持 IP 证书。Debian 13 的默认 Certbot 4.0 支持域名
+HTTPS，但不满足 IP 证书能力要求。
 
 可通过 `CDSI_ACME_FALLBACK_SERVER` 指定备用 CA，但只在主 ACME directory
 网络不可达时使用。DNS、CAA、授权、证书校验和限额错误不会自动切换；ZeroSSL
@@ -84,7 +95,8 @@ CDSI Beacon 源站域名、用户名和 Application Password
 ```
 
 没有活动域名时，网站地址显示为 `http://<服务器 IP>`。报告同时区分服务的
-Runtime 与 Boot 状态：Nginx、MySQL 和 PHP-FPM 必须同时 active/enabled；
+Runtime 与 Boot 状态：Nginx、MySQL/MariaDB 和 PHP-FPM 必须同时
+active/enabled；
 HTTPS 配置成功时 Certbot 续期 timer 也必须 active/enabled。
 
 凭据保存在仓库本机的 `password/` 目录并设置为 600 权限；
@@ -97,8 +109,8 @@ Anchor 当前负责基础设施和 WordPress OpenWeb 节点的安装，不负责
 
 WordPress 自身提供文章管理、RSS 和 REST API；
 
-Anchor 可以运行在提供受支持 Ubuntu Server 或 CentOS Stream 的云服务器或
-自有主机上，但项目
+Anchor 可以运行在提供受支持 Ubuntu Server、Debian 或 CentOS Stream 的
+云服务器或自有主机上，但项目
 当前按操作系统版本验证安装路径，不对阿里云、腾讯云、AWS 等厂商分别作兼容
 认证，也不会调用云厂商专有 API。
 
@@ -126,11 +138,12 @@ M0 接下来聚焦：
 
 ## 设计原则
 
-- 基础栈使用系统默认软件源；CentOS 仅为 Certbot 和可选 Imagick 显式启用
-  EPEL，不引入 Remi。
+- 基础栈使用系统默认软件源；CentOS 仅为 Certbot 显式启用 EPEL，不引入
+  Remi。PHP 图片处理使用 GD，不安装 Imagick。
 - 安装脚本默认幂等，不重置已有凭据或覆盖用户数据。
 - 域名解析未确认、IP 证书能力不足或证书签发失败时保留可用的 HTTP 站点。
-- Nginx、MySQL、PHP-FPM 和已配置证书的续期 timer 都验证运行与开机自启。
+- Nginx、MySQL/MariaDB、PHP-FPM 和已配置证书的续期 timer 都验证运行与
+  开机自启。
 - 任何删除、覆盖或凭据轮换都必须显式确认并可审计。
 - 用户拥有域名、数据库、内容、配置和备份；CDSI 不形成新的数据孤岛。
 

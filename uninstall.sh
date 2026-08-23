@@ -165,6 +165,10 @@ autoremove() {
 # ── MySQL root helper (reads root password from password file) ─
 _mysql_root() {
     local pw=""
+    if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+        "${SUDO[@]}" mysql -u root "$@"
+        return
+    fi
     if [[ -f "${PASS_DIR}/mysql.pass" ]]; then
         pw="$(grep '^root:' "${PASS_DIR}/mysql.pass" 2>/dev/null | cut -d: -f2- || true)"
     fi
@@ -375,14 +379,20 @@ uninstall_nginx() {
 }
 
 uninstall_mysql() {
-    log "── 卸载 MySQL ──"
+    log "── 卸载数据库 ──"
     # Drop the CDSI database/user while the server is still up.
     drop_cdsi_database \
-        || log_warn "无法单独删除 cdsi 库/用户；MySQL 数据目录仍将按确认范围清理。"
+        || log_warn "无法单独删除 cdsi 库/用户；数据库数据目录仍将按确认范围清理。"
     stop_disable_svc "$CDSI_DB_SERVICE"
     if cdsi_is_centos_stream; then
         purge_glob 'mysql8.4*'
         do_rm /etc/my.cnf.d/zz-cdsi-anchor.cnf
+    elif cdsi_is_debian; then
+        purge_glob 'default-mysql-server*'
+        purge_glob 'mariadb-server*'
+        purge_glob 'mariadb-client*'
+        purge_glob 'mariadb-common'
+        do_rm /etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf
     else
         purge_glob 'mysql-server*'
         purge_glob 'mysql-client*'
@@ -391,7 +401,7 @@ uninstall_mysql() {
     fi
     do_rm /var/lib/mysql
     do_rm "${PASS_DIR}/mysql.pass"
-    log_ok "MySQL 已卸载 (数据库 cdsi 与凭据已清理)。"
+    log_ok "数据库服务已卸载 (数据库 cdsi 与凭据已清理)。"
 }
 
 uninstall_php() {
@@ -404,8 +414,9 @@ uninstall_php() {
     if [[ -n "$php_service" ]]; then
         stop_disable_svc "$php_service"
     fi
-    # Curated list = exactly what install-php.sh provisions (plus versioned forms).
-    # Avoids a broad 'php*' glob that could remove unrelated PHP packages.
+    # Curated list covers current packages plus legacy Imagick packages installed
+    # by earlier Anchor releases. Avoid a broad 'php*' glob that could remove
+    # unrelated PHP packages.
     local pkgs=()
     if cdsi_is_centos_stream; then
         pkgs=(php php-cli php-fpm php-common php-mbstring php-xml php-bcmath \
@@ -415,7 +426,7 @@ uninstall_php() {
         pkgs=(php-cli php-fpm php-common php-curl php-mbstring php-xml php-zip \
               php-bcmath php-intl php-mysql php-opcache php-redis php-gd php-imagick)
     fi
-    if cdsi_is_ubuntu && [[ -n "$ver" ]]; then
+    if cdsi_is_apt_family && [[ -n "$ver" ]]; then
         pkgs+=( "php${ver}-fpm" "php${ver}-cli" "php${ver}-common" "php${ver}-opcache" \
                  "php${ver}-curl" "php${ver}-mbstring" "php${ver}-xml" "php${ver}-zip" \
                  "php${ver}-bcmath" "php${ver}-intl" "php${ver}-mysql" "php${ver}-redis" \
@@ -427,8 +438,8 @@ uninstall_php() {
 
 uninstall_redis() {
     log "── 卸载 Redis ──"
-    if cdsi_is_centos_stream; then
-        log_warn "Redis 不是 CentOS Stream 的 Anchor 组件，跳过以保护现有服务。"
+    if ! cdsi_is_ubuntu; then
+        log_warn "Redis 不是 ${CDSI_OS_PRETTY} 的 Anchor 组件，跳过以保护现有服务。"
         return 0
     fi
     stop_disable_svc redis-server
@@ -441,8 +452,8 @@ uninstall_redis() {
 
 uninstall_supervisor() {
     log "── 卸载 Supervisor ──"
-    if cdsi_is_centos_stream; then
-        log_warn "Supervisor 不是 CentOS Stream 的 Anchor 组件，跳过以保护现有服务。"
+    if ! cdsi_is_ubuntu; then
+        log_warn "Supervisor 不是 ${CDSI_OS_PRETTY} 的 Anchor 组件，跳过以保护现有服务。"
         return 0
     fi
     stop_disable_svc supervisor
@@ -732,7 +743,12 @@ uninstall_wordpress() {
 # Uninstall order matters: dependents first, so dangling configs are
 # cleaned before their backing service disappears.
 COMP_KEYS=(nginx mysql php redis supervisor certbot wordpress)
-COMP_NAMES=(Nginx MySQL "PHP-FPM" Redis Supervisor Certbot WordPress)
+if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+    DATABASE_COMPONENT_NAME="MariaDB"
+else
+    DATABASE_COMPONENT_NAME="MySQL"
+fi
+COMP_NAMES=(Nginx "$DATABASE_COMPONENT_NAME" "PHP-FPM" Redis Supervisor Certbot WordPress)
 COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "Redis数据库" "进程守护" "SSL证书" "WordPress站点")
 UNINSTALL_ORDER=(certbot wordpress php redis supervisor nginx mysql)
 
@@ -757,6 +773,8 @@ comp_what() {
         mysql)
             if cdsi_is_centos_stream; then
                 echo "${CDSI_DB_PACKAGE} 包 + Anchor 配置 /etc/my.cnf.d/zz-cdsi-anchor.cnf + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
+            elif cdsi_is_debian; then
+                echo "${CDSI_DB_PACKAGE} 包 + Anchor 配置 /etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
             else
                 echo "${CDSI_DB_PACKAGE} 包 + /etc/mysql 配置 + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
             fi
@@ -884,7 +902,7 @@ done
 main() {
     if ! cdsi_platform_supported; then
         log_fail "不支持的操作系统: ${CDSI_OS_PRETTY}。卸载器未做任何修改。"
-        log "Anchor 支持 Ubuntu Server 24.04/26.04 LTS 和 CentOS Stream 10。"
+        log "Anchor 支持 Ubuntu Server 24.04/26.04 LTS、Debian 13 和 CentOS Stream 10。"
         return 3
     fi
     log "CDSI Uninstaller 启动。"

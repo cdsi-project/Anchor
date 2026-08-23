@@ -224,22 +224,22 @@ CDSI Anchor is currently in **M0 integration and hardening**. The installer
 version is **0.3.0**.
 
 The primary path now provisions a WordPress OpenWeb node on supported Ubuntu
-Server and CentOS Stream releases:
+Server, Debian, and CentOS Stream releases:
 
 | Status | Scope |
 | --- | --- |
-| Implemented in `install.sh` | Preflight, Nginx, MySQL, PHP-FPM, Certbot, WordPress, domain/HTTPS configuration, final service/access report, and component uninstall |
-| Implemented support | Ubuntu APT and CentOS DNF/systemd routes, bounded package retries, strict domain DNS activation, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
+| Implemented in `install.sh` | Preflight, Nginx, MySQL/MariaDB, PHP-FPM, Certbot, WordPress, domain/HTTPS configuration, final service/access report, and component uninstall |
+| Implemented support | Ubuntu/Debian APT and CentOS DNF/systemd routes, bounded package retries, strict domain DNS activation, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
 | Standalone only | Redis and Supervisor scripts remain available, but are hidden from the main menu and Install All flow |
 | Planned | Composer/CDSI Core deployment, the `cdsi` CLI, `cdsi doctor`, resume/update workflows, and complete server backup/restore |
 
 The supported fresh-install runtime is deliberately narrow:
 
 ```text
-OS           Ubuntu Server 24.04/26.04 LTS or CentOS Stream 10
+OS           Ubuntu Server 24.04/26.04 LTS, Debian 13, or CentOS Stream 10
 Web          Nginx from the operating system's default source
-Runtime      PHP-FPM from the operating system's default source
-Database     MySQL (mysql-server on Ubuntu, mysql8.4-server on CentOS)
+Runtime      PHP-FPM from the operating system's default source (PHP 8.4 on Debian 13)
+Database     MySQL on Ubuntu/CentOS; MySQL-compatible MariaDB 11.8 on Debian 13
 SSL          Let's Encrypt / Certbot for a verified domain; explicit IP HTTPS when supported
 OpenWeb      WordPress
 Integration  CDSI Beacon WordPress Application Password
@@ -281,8 +281,8 @@ The following are planned and should not be considered implemented by Anchor:
 
 ## 安装前准备
 
-Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS** 和
-**CentOS Stream 10**。Debian 目录仅保留扩展边界，尚未实现安装支持。
+Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13** 和
+**CentOS Stream 10**。
 
 ### 必需
 
@@ -291,7 +291,9 @@ Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS** 和
    - 最低 1 核 CPU、1 GB 内存和 10 GB 根分区可用空间；推荐 2 GB 内存和
      20 GB 根分区可用空间
    - 登录用户需要 root 或 sudo 权限
-   - 系统使用 systemd，以及 Ubuntu APT 或 CentOS DNF 默认软件源
+   - 系统使用 systemd，以及 Ubuntu/Debian APT 或 CentOS DNF 默认软件源
+   - Debian 13 需要先更新 APT 索引并安装 Git 与 CA 证书，完整命令见下方
+     “Installation Experience”
    - CentOS Stream 10 需要先更新系统、启用 EPEL 并安装 Git，完整命令见下方
      “Installation Experience”
 2. **稳定的公网入口和网络连接**
@@ -318,17 +320,18 @@ WordPress URL 或 Nginx 站点。
 公网 IP 也可以显式申请公信 HTTPS，但必须是公网 IPv4，且系统提供的 Certbot
 必须为 5.4 或更高版本并支持 Let's Encrypt `shortlived` profile。能力不足时
 Anchor 保持现有 HTTP 站点，不会安装不受信任证书，也不承诺 CentOS Stream
-当前系统包一定满足该版本要求。公网 IP 探测受限时可显式传入
-`CDSI_SERVER_IP`。
+当前系统包一定满足该版本要求。Debian 13 默认源提供的 Certbot 4.0 支持域名
+HTTPS，但不满足 IP 证书所需的 Certbot 5.4+ 能力。公网 IP 探测受限时可显式
+传入 `CDSI_SERVER_IP`。
 
 ### 建议
 
 - 优先使用干净、专用的服务器，不要与已有生产网站、数据库或共享运行时混用。
-- Ubuntu 安装前移除 nginx.org、Ondrej PHP/Nginx PPA 等冲突源；Anchor 不会
-  静默改写这些软件源。CentOS 基础栈使用 BaseOS/AppStream，并会在需要
-  Certbot 或可选 Imagick 时从 CentOS Extras 安装 `epel-release`。
+- Ubuntu/Debian 安装前移除 nginx.org、Ondrej/Sury PHP 等第三方冲突源；
+  Anchor 不会静默改写这些软件源。CentOS 基础栈使用 BaseOS/AppStream，
+  Certbot 需要的 `epel-release` 来自 CentOS Extras。
 - 如果服务器已有业务数据或配置，先创建云盘快照，并备份 Nginx、PHP、MySQL
-  和 WordPress 数据。
+  或 MariaDB，以及 WordPress 数据。
 - 长时间安装可在 `tmux` 或 `screen` 会话中执行，避免 SSH 中断影响交互流程。
 
 ---
@@ -336,6 +339,13 @@ Anchor 保持现有 HTTP 站点，不会安装不受信任证书，也不承诺 
 ## Installation Experience
 
 The current entry point is:
+
+Debian 13 需要先通过系统默认源准备 Git 和 CA 证书：
+
+```bash
+sudo apt update
+sudo apt install -y git ca-certificates
+```
 
 CentOS Stream 10 需要先通过系统默认源完成安装前准备：
 
@@ -365,7 +375,7 @@ cd Anchor
 sudo ./install.sh
 ```
 
-The goal is to reduce infrastructure complexity so that owning an independent digital node does not require deep knowledge of Linux, Nginx, PHP, MySQL, SSL, or deployment.
+The goal is to reduce infrastructure complexity so that owning an independent digital node does not require deep knowledge of Linux, Nginx, PHP, MySQL/MariaDB, SSL, or deployment.
 
 > The infrastructure should be complex underneath, but simple for the creator.
 
@@ -395,9 +405,9 @@ sudo bash scripts/install-wordpress.sh
 ```
 
 这些公开脚本会先检测操作系统，再路由到对应平台目录。
-`scripts/ubuntu/` 与 `scripts/centos-stream/` 已实现，并复用
-`scripts/common/` 中的组件实现；`scripts/debian/` 仍会在修改系统前明确返回
-“不支持”。Redis 与 Supervisor 独立脚本目前仅支持 Ubuntu。
+`scripts/ubuntu/`、`scripts/debian/` 与 `scripts/centos-stream/` 已实现，并复用
+`scripts/common/` 中的组件实现。Redis 与 Supervisor 独立脚本目前仍仅支持
+Ubuntu。
 
 `check-env.sh` is the active preflight implementation. `configure.sh` is a
 standalone `/etc/cdsi` configuration helper that is not yet called by the main
@@ -419,16 +429,17 @@ DNS, CAA, authorization, certificate-validation, and rate-limit failures never
 trigger an automatic CA switch. ZeroSSL additionally requires
 `CDSI_ACME_FALLBACK_EAB_KID` and `CDSI_ACME_FALLBACK_EAB_HMAC_KEY`.
 
-Nginx, MySQL, and PHP-FPM installers verify both the active runtime state and
-systemd boot enablement. When HTTPS is configured, the available
+Nginx, database, and PHP-FPM installers verify both the active runtime state
+and systemd boot enablement. When HTTPS is configured, the available
 `certbot.timer` or `certbot-renew.timer` must likewise be active and enabled.
 
 The PHP installer uses each supported operating system's default PHP stream. It
 does not add a PHP PPA/Remi repository or replace an existing global PHP
-alternative. A fresh installation provisions Redis, ZIP, GD, and OPcache;
-Imagick is optional and uses the system package on Ubuntu or EPEL on CentOS.
-The fast path verifies PHP-FPM and the complete required extension set before it
-skips reconciliation.
+alternative. A fresh installation provisions Redis, ZIP, GD, and OPcache. GD is
+the supported image-processing extension; Anchor does not install Imagick.
+Debian 13 uses PHP 8.4 and its versioned extension packages from the default
+repository. The fast path verifies PHP-FPM and the complete required extension
+set before it skips reconciliation.
 
 ---
 
@@ -458,7 +469,7 @@ Anchor/
 │   ├── install-*.sh      # 可独立运行的公开入口
 │   ├── common/           # 共享组件实现
 │   ├── ubuntu/           # 已实现的平台路由
-│   ├── debian/           # 规划边界，尚未实现
+│   ├── debian/           # 已实现的 Debian 13 平台路由
 │   └── centos-stream/    # 已实现的平台路由
 ├── templates/
 ├── tests/

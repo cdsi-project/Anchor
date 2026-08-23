@@ -55,16 +55,26 @@ for entry in "${entries[@]}"; do
         || { printf 'FAIL: missing Ubuntu route for %s\n' "$entry" >&2; exit 1; }
     [[ -f "${TEST_ROOT}/scripts/centos-stream/${entry}" ]] \
         || { printf 'FAIL: missing CentOS Stream route for %s\n' "$entry" >&2; exit 1; }
+    [[ -f "${TEST_ROOT}/scripts/debian/${entry}" ]] \
+        || { printf 'FAIL: missing Debian route for %s\n' "$entry" >&2; exit 1; }
     if ! grep -q 'CDSI_PLATFORM_ROUTE=centos-stream' \
         "${TEST_ROOT}/scripts/centos-stream/${entry}"; then
         printf 'FAIL: CentOS Stream route does not set its platform identity: %s\n' \
             "$entry" >&2
         exit 1
     fi
+    if ! grep -q 'CDSI_PLATFORM_ROUTE=debian' \
+        "${TEST_ROOT}/scripts/debian/${entry}"; then
+        printf 'FAIL: Debian route does not set its platform identity: %s\n' \
+            "$entry" >&2
+        exit 1
+    fi
+    /bin/sh -n "${TEST_ROOT}/scripts/debian/${entry}" \
+        || { printf 'FAIL: Debian route has invalid POSIX shell syntax: %s\n' "$entry" >&2; exit 1; }
 done
 
-[[ -f "${TEST_ROOT}/scripts/debian/README.md" ]] \
-    || { printf 'FAIL: missing planned-platform boundary for Debian\n' >&2; exit 1; }
+[[ ! -e "${TEST_ROOT}/scripts/debian/README.md" ]] \
+    || { printf 'FAIL: implemented Debian route still has a planned-only README\n' >&2; exit 1; }
 [[ ! -e "${TEST_ROOT}/scripts/centos-stream/README.md" ]] \
     || { printf 'FAIL: implemented CentOS Stream route still has a planned-only README\n' >&2; exit 1; }
 
@@ -137,7 +147,7 @@ for nginx_template in "${TEST_ROOT}/config/nginx-site.conf.template"; do
     if ! grep -Fq 'include fastcgi_params;' "$nginx_template" \
        || ! grep -Fq 'fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;' \
             "$nginx_template"; then
-        printf 'FAIL: Nginx PHP forwarding is not portable across Ubuntu and CentOS Stream\n' >&2
+        printf 'FAIL: Nginx PHP forwarding is not portable across supported platforms\n' >&2
         exit 1
     fi
 done
@@ -159,4 +169,4 @@ if ! grep -q -- '-D "$DB_NAME"' \
     exit 1
 fi
 
-printf 'PASS: platform dispatcher directory layout\n'
+printf 'PASS: Ubuntu, Debian, and CentOS Stream platform dispatcher layout\n'

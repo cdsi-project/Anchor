@@ -170,7 +170,7 @@ install_php_extension() {
 php_base_packages() {
     cdsi_platform_init
     case "$CDSI_PLATFORM" in
-        ubuntu)
+        ubuntu|debian)
             printf '%s\n' \
                 php-cli \
                 php-fpm \
@@ -204,7 +204,7 @@ php_base_packages() {
 install_required_php_extensions() {
     local version="$1"
     case "$CDSI_PLATFORM" in
-        ubuntu)
+        ubuntu|debian)
             install_php_extension "Zend OPcache" true \
                 php-opcache "php${version}-opcache"
             install_php_extension redis true \
@@ -224,38 +224,16 @@ install_required_php_extensions() {
     esac
 }
 
-install_optional_imagick() {
-    local version="$1"
-    if cdsi_is_ubuntu; then
-        install_php_extension imagick false \
-            php-imagick "php${version}-imagick"
-        return
-    fi
-
-    cdsi_is_centos_stream || return 1
-    if php_extension_loaded imagick; then
-        log "PHP extension imagick is already loaded."
-        return 0
-    fi
-
-    log "Enabling EPEL for the optional PHP Imagick package..."
-    if ! cdsi_enable_epel; then
-        warn "Could not enable EPEL; optional PHP extension imagick was skipped."
-        return 0
-    fi
-    install_php_extension imagick false php-pecl-imagick
-}
-
 resolve_installed_php_runtime() {
     local fpm_depends=""
-    if cdsi_is_ubuntu; then
+    if cdsi_is_apt_family; then
         if ! fpm_depends="$(dpkg-query -W -f='${Depends}' php-fpm 2>/dev/null)"; then
             fail "Could not inspect the installed php-fpm package."
         fi
         if [[ "$fpm_depends" =~ (php[0-9]+\.[0-9]+-fpm) ]]; then
             FPM_PACKAGE="${BASH_REMATCH[1]}"
         else
-            fail "Could not determine the Ubuntu default PHP-FPM version from: ${fpm_depends}"
+            fail "Could not determine the default APT PHP-FPM version from: ${fpm_depends}"
         fi
         PHP_VERSION="${FPM_PACKAGE#php}"
         PHP_VERSION="${PHP_VERSION%-fpm}"
@@ -290,23 +268,23 @@ fi
 
 cdsi_platform_init
 if ! cdsi_platform_supported; then
-    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS or CentOS Stream 10."
+    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS, Debian 13, or CentOS Stream 10."
 fi
 
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required."
 
-if cdsi_is_ubuntu; then
+if cdsi_is_apt_family; then
     command -v apt-get >/dev/null 2>&1 || fail "apt-get is required."
 
-    # Do not remove a configured PPA automatically because another application
-    # on the host may depend on it.
+    # Do not remove a configured third-party source automatically because
+    # another application on the host may depend on it.
     for source_file in \
         /etc/apt/sources.list \
         /etc/apt/sources.list.d/*.list \
         /etc/apt/sources.list.d/*.sources; do
         [[ -f "$source_file" ]] || continue
-        if grep -qsE 'ppa\.launchpad(content)?\.net/ondrej/php|ppa:ondrej/php' "$source_file"; then
-            fail "Third-party Ondrej PHP source detected in ${source_file}. Remove it before continuing: sudo add-apt-repository --remove -y ppa:ondrej/php"
+        if grep -qsE 'ppa\.launchpad(content)?\.net/ondrej/php|ppa:ondrej/php|packages\.sury\.org/php' "$source_file"; then
+            fail "Third-party PHP source detected in ${source_file}. Remove it before continuing."
         fi
     done
 elif cdsi_is_centos_stream; then
@@ -358,7 +336,6 @@ resolve_installed_php_runtime
 [[ -n "$PHP_BIN" && -x "$PHP_BIN" ]] || fail "PHP ${PHP_VERSION} binary was not installed."
 
 install_required_php_extensions "$PHP_VERSION"
-install_optional_imagick "$PHP_VERSION"
 
 if ! required_php_extensions_loaded; then
     missing_extensions=()

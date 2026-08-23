@@ -87,6 +87,14 @@ assert_equal "1" "$(wc -l < "$epel_log" | tr -d '[:space:]')" \
 assert_equal "false" "$CERTBOT_REPOSITORY_READY" \
     "Ubuntu repository state must remain unchanged"
 
+platform_fixture="debian"
+CERTBOT_REPOSITORY_READY=false
+prepare_certbot_repository
+assert_equal "1" "$(wc -l < "$epel_log" | tr -d '[:space:]')" \
+    "Debian Certbot path must not enable EPEL"
+assert_equal "false" "$CERTBOT_REPOSITORY_READY" \
+    "Debian repository state must remain unchanged"
+
 prepare_call_line="$(awk '
     /^[[:space:]]+prepare_certbot_repository$/ { print NR; exit }
 ' "$CERTBOT_SCRIPT")"
@@ -98,7 +106,9 @@ package_install_line="$(awk '
 (( prepare_call_line < package_install_line )) \
     || fail_test "Certbot package installation occurs before repository preparation"
 grep -Fq 'CERTBOT_PACKAGES=(certbot python3-certbot-nginx)' "$CERTBOT_SCRIPT" \
-    || fail_test "Ubuntu Certbot package pair changed"
+    || fail_test "APT Certbot package pair changed"
+grep -Fq 'Debian 13' "$CERTBOT_SCRIPT" \
+    || fail_test "Certbot platform guard does not document Debian 13 support"
 
 # ACME fallback is a reachability decision, not an unconditional CA switch.
 # Exercise the selector with a mocked directory probe so no network request is
@@ -279,6 +289,7 @@ run_timer_case() {
 }
 
 run_timer_case ubuntu certbot.timer certbot.timer
+run_timer_case debian certbot.timer certbot.timer
 run_timer_case centos-stream certbot-renew.timer certbot-renew.timer
 
 domain_guard="$(awk '
@@ -347,7 +358,9 @@ anchor_site="${site_dir}/wordpress.conf"
 unrelated_site="${site_dir}/unrelated.conf"
 cat > "$anchor_site" <<'EOF'
 # CDSI WordPress site block - managed by install-wordpress.sh
-server { server_name _; }
+server {
+    server_name _;
+}
 EOF
 cat > "$unrelated_site" <<'EOF'
 server { server_name _; }
@@ -371,9 +384,122 @@ grep -Fq 'server_name example.com;' "$anchor_site" \
 assert_equal "$unrelated_before" "$(sha256sum "$unrelated_site" | awk '{print $1}')" \
     "Certbot must not modify an unrelated catch-all site"
 
+(
+    SUDO=""
+    CDSI_NGINX_SITE_DIR="$site_dir"
+    CDSI_NGINX_SERVICE="nginx"
+    PRIMARY_DOMAIN="example.com"
+    log() { :; }
+    log_ok() { :; }
+    fail() { printf 'FAIL: %s\n' "$*" >&2; exit 91; }
+    nginx() { return 0; }
+    cdsi_service_reload() { return 0; }
+    _update_server_name
+) || fail_test "an already-correct Anchor server_name was not accepted"
+
+domain_site="${site_dir}/example.com.conf"
+cp -- "$anchor_site" "$domain_site"
+(
+    SUDO=""
+    CDSI_NGINX_SITE_DIR="$site_dir"
+    CDSI_NGINX_SERVICE="nginx"
+    PRIMARY_DOMAIN="example.com"
+    CDSI_DOMAIN="example.com"
+    log() { :; }
+    log_ok() { :; }
+    fail() { exit 91; }
+    nginx() { return 0; }
+    cdsi_service_reload() { return 0; }
+    _update_server_name
+) || fail_test "the primary domain-named Anchor site was not accepted"
+
+cat > "$domain_site" <<'EOF'
+# CDSI WordPress site block - managed by install-wordpress.sh
+server {
+    server_name example.com
+        www.example.com;
+}
+EOF
+(
+    SUDO=""
+    CDSI_NGINX_SITE_DIR="$site_dir"
+    CDSI_NGINX_SERVICE="nginx"
+    PRIMARY_DOMAIN="example.com"
+    CDSI_DOMAIN="example.com,www.example.com"
+    log() { :; }
+    log_ok() { :; }
+    fail() { exit 91; }
+    nginx() { return 0; }
+    cdsi_service_reload() { return 0; }
+    _update_server_name
+) || fail_test "a complete multi-domain server_name was not accepted"
+
+cat > "$domain_site" <<'EOF'
+# CDSI WordPress site block - managed by install-wordpress.sh
+# server_name _;
+server {
+    proxy_set_header server_name example.com;
+    server_name notexample.com;
+}
+EOF
+(
+    SUDO=""
+    CDSI_NGINX_SITE_DIR="$site_dir"
+    CDSI_NGINX_SERVICE="nginx"
+    PRIMARY_DOMAIN="example.com"
+    CDSI_DOMAIN="example.com,www.example.com"
+    log() { :; }
+    log_ok() { :; }
+    fail() { exit 91; }
+    nginx() { return 0; }
+    cdsi_service_reload() { return 0; }
+    _update_server_name
+) || fail_test "an incorrect Anchor server_name was not repaired"
+grep -Fq 'server_name example.com www.example.com;' "$domain_site" \
+    || fail_test "the repaired server_name does not contain the complete domain set"
+grep -Fq 'proxy_set_header server_name example.com;' "$domain_site" \
+    || fail_test "the server_name repair changed an unrelated directive"
+grep -Fq '# server_name _;' "$domain_site" \
+    || fail_test "the server_name repair changed a comment"
+if grep -Eq '^[[:space:]]*server_name[[:space:]]+notexample\.com;' "$domain_site"; then
+    fail_test "the server_name repair retained a substring domain"
+fi
+
+cat > "$domain_site" <<'EOF'
+# CDSI WordPress site block - managed by install-wordpress.sh
+server {
+    server_name example.com www.example.com;
+}
+server {
+    server_name example.com www.example.com;
+}
+EOF
+(
+    SUDO=""
+    CDSI_NGINX_SITE_DIR="$site_dir"
+    CDSI_NGINX_SERVICE="nginx"
+    PRIMARY_DOMAIN="example.com"
+    CDSI_DOMAIN="example.com"
+    log() { :; }
+    log_ok() { :; }
+    fail() { exit 91; }
+    nginx() { return 0; }
+    cdsi_service_reload() { return 0; }
+    _update_server_name
+) || fail_test "a removed domain alias was not reconciled"
+assert_equal "2" \
+    "$(grep -Ec '^[[:space:]]*server_name[[:space:]]+example\.com;' "$domain_site")" \
+    "both Certbot server blocks must retain the primary domain after alias removal"
+if grep -Eq '^[[:space:]]*server_name[^;]*www\.example\.com' "$domain_site"; then
+    fail_test "the removed domain alias remained in server_name"
+fi
+rm -f -- "$domain_site"
+
 cat > "$anchor_site" <<'EOF'
 # CDSI WordPress site block - managed by install-wordpress.sh
-server { server_name _; }
+server {
+    server_name _;
+}
 EOF
 anchor_before="$(sha256sum "$anchor_site" | awk '{print $1}')"
 if (
@@ -420,4 +546,4 @@ assert_equal "$non_anchor_before" \
     "$(sha256sum "${site_dir}/example.com.conf" | awk '{print $1}')" \
     "non-Anchor domain configuration must remain unchanged"
 
-printf 'PASS: Certbot EPEL, renewal, no-domain, and Anchor-only Nginx contracts\n'
+printf 'PASS: Certbot Debian/EPEL, renewal, no-domain, and Anchor-only Nginx contracts\n'

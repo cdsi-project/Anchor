@@ -50,6 +50,10 @@ assert_os_status 2
 set_platform_fixture ubuntu "22.04" "Ubuntu 22.04 LTS"
 assert_os_status 2
 set_platform_fixture debian "13" "Debian GNU/Linux 13"
+assert_os_status 0
+set_platform_fixture debian "12" "Debian GNU/Linux 12"
+assert_os_status 2
+set_platform_fixture debian "14" "Debian GNU/Linux 14"
 assert_os_status 2
 
 assert_arch_status() {

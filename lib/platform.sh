@@ -56,6 +56,28 @@ cdsi_platform_init() {
             CDSI_PHP_FPM_SERVICE=""
             CDSI_PHP_FPM_UPSTREAM=""
             ;;
+        debian)
+            CDSI_PACKAGE_BACKEND="apt"
+            CDSI_SERVICE_BACKEND="systemd"
+            CDSI_WEB_USER="www-data"
+            CDSI_WEB_GROUP="www-data"
+            CDSI_NGINX_SERVICE="nginx"
+            CDSI_NGINX_CONF_DIR="/etc/nginx"
+            CDSI_NGINX_MAIN_CONF="/etc/nginx/nginx.conf"
+            CDSI_NGINX_SITE_DIR="/etc/nginx/sites-available"
+            CDSI_NGINX_ENABLED_DIR="/etc/nginx/sites-enabled"
+            CDSI_NGINX_LOG_DIR="/var/log/nginx"
+            CDSI_DB_PACKAGE="default-mysql-server"
+            CDSI_DB_SERVICE="mariadb"
+            CDSI_DB_FLAVOR="mariadb"
+            CDSI_CERTBOT_CONFIG_DIR="/etc/letsencrypt"
+            CDSI_PHP_VERSION=""
+            CDSI_PHP_PACKAGE_PREFIX="php"
+            CDSI_PHP_BIN="/usr/bin/php"
+            CDSI_PHP_FPM_BIN=""
+            CDSI_PHP_FPM_SERVICE=""
+            CDSI_PHP_FPM_UPSTREAM=""
+            ;;
         centos-stream)
             CDSI_PACKAGE_BACKEND="dnf"
             CDSI_SERVICE_BACKEND="systemd"
@@ -126,6 +148,16 @@ cdsi_is_ubuntu() {
     [[ "$CDSI_PLATFORM" == "ubuntu" ]]
 }
 
+cdsi_is_debian() {
+    cdsi_platform_init
+    [[ "$CDSI_PLATFORM" == "debian" ]]
+}
+
+cdsi_is_apt_family() {
+    cdsi_platform_init
+    [[ "$CDSI_PLATFORM" == "ubuntu" || "$CDSI_PLATFORM" == "debian" ]]
+}
+
 cdsi_is_centos_stream() {
     cdsi_platform_init
     [[ "$CDSI_PLATFORM" == "centos-stream" ]]
@@ -141,6 +173,9 @@ cdsi_platform_supported() {
         ubuntu)
             [[ "$CDSI_OS_VERSION" == "24.04" || "$CDSI_OS_VERSION" == "26.04" ]] \
                 && cdsi_arch_supported
+            ;;
+        debian)
+            [[ "$CDSI_OS_VERSION" == "13" ]] && cdsi_arch_supported
             ;;
         centos-stream)
             [[ "$CDSI_OS_VERSION" == "10" ]] && cdsi_arch_supported
@@ -167,7 +202,7 @@ cdsi_php_service_name() {
     cdsi_platform_init
     local version="${1:-${CDSI_PHP_VERSION:-}}"
     case "$CDSI_PLATFORM" in
-        ubuntu)
+        ubuntu|debian)
             if [[ -n "$version" ]]; then
                 printf 'php%s-fpm\n' "$version"
             fi
@@ -192,7 +227,7 @@ cdsi_php_fpm_version() {
         fi
         return 1
     fi
-    cdsi_is_ubuntu || return 1
+    cdsi_is_apt_family || return 1
     if command -v dpkg-query >/dev/null 2>&1; then
         depends="$(dpkg-query -W -f='${Depends}' php-fpm 2>/dev/null || true)"
         if [[ "$depends" =~ php([0-9]+\.[0-9]+)-fpm ]]; then
@@ -220,7 +255,7 @@ cdsi_php_fpm_upstream() {
     cdsi_platform_init
     local version="${1:-${CDSI_PHP_VERSION:-}}"
     case "$CDSI_PLATFORM" in
-        ubuntu)
+        ubuntu|debian)
             if [[ -n "$version" ]]; then
                 printf 'unix:/run/php/php%s-fpm.sock\n' "$version"
             fi

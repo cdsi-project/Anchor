@@ -111,6 +111,18 @@ assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
 assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
     "Ubuntu service compatibility alias"
 
+init_platform_fixture debian 13 "Debian GNU/Linux" "Debian GNU/Linux 13"
+assert_equal "debian" "$CDSI_PLATFORM" "Debian platform"
+assert_equal "apt" "$CDSI_PACKAGE_BACKEND" "Debian package backend"
+assert_equal "default-mysql-server" "$CDSI_DB_PACKAGE" \
+    "Debian default database package"
+assert_equal "mariadb" "$CDSI_DB_SERVICE" "Debian MariaDB service"
+assert_equal "mariadb" "$CDSI_DB_FLAVOR" "Debian database flavor"
+assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
+    "Debian package compatibility alias"
+assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
+    "Debian service compatibility alias"
+
 init_platform_fixture centos 10 "CentOS Stream" "CentOS Stream 10"
 assert_equal "centos-stream" "$CDSI_PLATFORM" "CentOS Stream platform"
 assert_equal "dnf" "$CDSI_PACKAGE_BACKEND" "CentOS package backend"
@@ -153,12 +165,20 @@ assert_contains '${SUDO} mysqld --validate-config' \
     "MySQL local-bind config is not validated before use"
 assert_contains '${SUDO} rm -f -- "$config_file"' \
     "invalid MySQL local-bind config is not rolled back"
+assert_contains 'local config_file="/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"' \
+    "Debian MariaDB local-bind config path is missing"
+assert_contains '[mariadbd]' \
+    "Debian MariaDB local-bind config group is missing"
+assert_contains '${SUDO} mariadbd --verbose --help' \
+    "MariaDB local-bind configuration is not validated"
 assert_contains 'cdsi_service_restart "${CDSI_MYSQL_SERVICE}"' \
     "an active MySQL service is not restarted after listener hardening"
-assert_contains 'fail "MySQL has a non-local TCP listener (${address});' \
-    "CentOS MySQL does not reject non-local listeners"
+assert_contains 'has a non-local TCP listener (${address});' \
+    "database installer does not reject non-local listeners"
 assert_count 3 'reconcile_mysql_runtime' \
     "MySQL network/runtime reconciliation must cover rerun and fresh paths"
+assert_count 2 'MYSQL_NETWORK_CONFIG_CHANGED=false' \
+    "database network-change state must be initialized and cleared after reconciliation"
 
 assert_contains "DB_NAME=\"cdsi\"" "database name is not pinned to cdsi"
 assert_contains "DB_USER=\"cdsi\"" "database user is not pinned to cdsi"
@@ -180,6 +200,12 @@ assert_contains \
 assert_contains \
     "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '\${ROOT_PASSWORD}';" \
     "MySQL root authentication is not pinned to caching_sha2_password"
+assert_contains 'ROOT_AUTH_MODE="socket"' \
+    "Debian MariaDB does not preserve unix_socket root authentication"
+assert_contains 'ROOT_PASSWORD=""' \
+    "Debian MariaDB should not persist a root password"
+assert_contains 'mysql_as_current_root <<SQL' \
+    "database provisioning does not use the platform root authentication path"
 assert_contains \
     'CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;' \
     "database creation is not idempotent utf8mb4 provisioning"
@@ -212,4 +238,4 @@ assert_contains \
     'mysql -u "${DB_USER}" -p"${CDSI_PASSWORD}" -D "$DB_NAME"' \
     "final application connection does not select the CDSI database"
 
-printf 'PASS: Ubuntu/CentOS MySQL mapping and provisioning safety contracts\n'
+printf 'PASS: Ubuntu/Debian/CentOS database mapping and provisioning safety contracts\n'

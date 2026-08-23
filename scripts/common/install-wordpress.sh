@@ -66,7 +66,7 @@ source "${CDSI_ROOT}/lib/wordpress-access.sh"
 source "${CDSI_ROOT}/lib/domain.sh"
 cdsi_platform_init
 cdsi_platform_supported \
-    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS and CentOS Stream 10."
+    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
 PASS_DIR="${CDSI_ROOT}/password"
 MYSQL_PASS_FILE="${PASS_DIR}/mysql.pass"
 WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
@@ -631,6 +631,7 @@ configure_nginx() {
     local rendered_file="" staged_file="" rollback_dir=""
     local preserve_certbot=false restore_failed=0 index path backup
     local -a rollback_paths=() rollback_backups=() rollback_present=()
+    local -a removal_paths=()
 
     _wordpress_nginx_is_managed() {
         local managed_path="$1"
@@ -681,10 +682,38 @@ configure_nginx() {
         if ! _wordpress_nginx_restore; then
             fail "${reason} Rollback was incomplete; backups remain in ${rollback_dir}."
         fi
-        ${SUDO} nginx -t >/dev/null 2>&1 || true
-        cdsi_service_reload "$CDSI_NGINX_SERVICE" >/dev/null 2>&1 || true
+        if ! ${SUDO} nginx -t >/dev/null 2>&1; then
+            fail "${reason} Previous files were restored but failed nginx -t; backups remain in ${rollback_dir}."
+        fi
+        if ! cdsi_service_reload "$CDSI_NGINX_SERVICE" >/dev/null 2>&1; then
+            fail "${reason} Previous files were restored but Nginx could not be reloaded; backups remain in ${rollback_dir}."
+        fi
         ${SUDO} rm -rf -- "$rollback_dir" 2>/dev/null || true
         fail "${reason} The previous Nginx configuration was restored."
+    }
+
+    _wordpress_nginx_plan_removal() {
+        local candidate_path="$1"
+        local foreign_policy="$2"
+        local planned_path=""
+
+        [[ "$candidate_path" != "$conf_path" \
+           && "$candidate_path" != "$enabled_path" ]] || return 0
+        for planned_path in "${removal_paths[@]}"; do
+            [[ "$planned_path" != "$candidate_path" ]] || return 0
+        done
+        [[ -e "$candidate_path" || -L "$candidate_path" ]] || return 0
+        if [[ -L "$candidate_path" && ! -e "$candidate_path" ]]; then
+            _wordpress_nginx_abort "Dangling Nginx path cannot be classified safely: ${candidate_path}."
+        fi
+        if ! _wordpress_nginx_is_managed "$candidate_path"; then
+            if [[ "$foreign_policy" == "leave" ]]; then
+                log "Leaving non-Anchor legacy Nginx path unchanged: ${candidate_path}."
+                return 0
+            fi
+            _wordpress_nginx_abort "Refusing to remove non-Anchor Nginx configuration: ${candidate_path}."
+        fi
+        removal_paths+=("$candidate_path")
     }
 
     phpver="$(detect_php_fpm)"
@@ -739,6 +768,28 @@ configure_nginx() {
         fi
     fi
 
+    # Classify every old path while all symlink targets still exist, then back
+    # up the complete removal set before changing any Nginx path. Enabled links
+    # are planned before their sites-available targets so rollback restores the
+    # targets first and the links second.
+    if [[ "${site_name}" != "wordpress" ]]; then
+        _wordpress_nginx_plan_removal "${CDSI_NGINX_ENABLED_DIR}/wordpress" leave
+        _wordpress_nginx_plan_removal "${CDSI_NGINX_ENABLED_DIR}/wordpress.conf" leave
+        _wordpress_nginx_plan_removal "${CDSI_NGINX_SITE_DIR}/wordpress" leave
+        _wordpress_nginx_plan_removal "${CDSI_NGINX_SITE_DIR}/wordpress.conf" leave
+    fi
+    if [[ -n "${CDSI_PREVIOUS_DOMAIN:-}" ]]; then
+        local previous_primary="${CDSI_PREVIOUS_DOMAIN%%,*}"
+        _wordpress_nginx_plan_removal \
+            "${CDSI_NGINX_ENABLED_DIR}/${previous_primary}.conf" refuse
+        _wordpress_nginx_plan_removal \
+            "${CDSI_NGINX_SITE_DIR}/${previous_primary}.conf" refuse
+    fi
+    for path in "${removal_paths[@]}"; do
+        _wordpress_nginx_backup_path "$path" \
+            || _wordpress_nginx_abort "Could not back up ${path}."
+    done
+
     if [[ "$preserve_certbot" != true ]]; then
         _wordpress_nginx_backup_path "$conf_path" \
             || _wordpress_nginx_abort "Could not back up ${conf_path}."
@@ -762,48 +813,10 @@ configure_nginx() {
             || _wordpress_nginx_abort "Could not enable ${conf_path}."
     fi
 
-    if [[ "${site_name}" != "wordpress" ]]; then
-        local legacy_path=""
-        for legacy_path in \
-            "${CDSI_NGINX_SITE_DIR}/wordpress" \
-            "${CDSI_NGINX_SITE_DIR}/wordpress.conf" \
-            "${CDSI_NGINX_ENABLED_DIR}/wordpress" \
-            "${CDSI_NGINX_ENABLED_DIR}/wordpress.conf"; do
-            [[ "$legacy_path" != "$conf_path" && "$legacy_path" != "$enabled_path" ]] \
-                || continue
-            [[ -e "$legacy_path" || -L "$legacy_path" ]] || continue
-            if ! _wordpress_nginx_is_managed "$legacy_path"; then
-                log "Leaving non-Anchor legacy Nginx path unchanged: ${legacy_path}."
-                continue
-            fi
-            _wordpress_nginx_backup_path "$legacy_path" \
-                || _wordpress_nginx_abort "Could not back up ${legacy_path}."
-            ${SUDO} rm -f -- "$legacy_path" \
-                || _wordpress_nginx_abort "Could not remove legacy Anchor site ${legacy_path}."
-        done
-    fi
-
-    # A standalone domain change may replace either an older domain-specific
-    # site or the IP-mode wordpress.conf. Remove only Anchor-managed paths and
-    # include every mutation in this function's rollback transaction.
-    if [[ -n "${CDSI_PREVIOUS_DOMAIN:-}" ]]; then
-        local previous_primary="${CDSI_PREVIOUS_DOMAIN%%,*}"
-        local previous_path=""
-        for previous_path in \
-            "${CDSI_NGINX_SITE_DIR}/${previous_primary}.conf" \
-            "${CDSI_NGINX_ENABLED_DIR}/${previous_primary}.conf"; do
-            [[ "$previous_path" != "$conf_path" && "$previous_path" != "$enabled_path" ]] \
-                || continue
-            [[ -e "$previous_path" || -L "$previous_path" ]] || continue
-            if ! _wordpress_nginx_is_managed "$previous_path"; then
-                _wordpress_nginx_abort "Refusing to remove non-Anchor Nginx configuration: ${previous_path}."
-            fi
-            _wordpress_nginx_backup_path "$previous_path" \
-                || _wordpress_nginx_abort "Could not back up ${previous_path}."
-            ${SUDO} rm -f -- "$previous_path" \
-                || _wordpress_nginx_abort "Could not remove the previous Anchor site ${previous_path}."
-        done
-    fi
+    for path in "${removal_paths[@]}"; do
+        ${SUDO} rm -f -- "$path" \
+            || _wordpress_nginx_abort "Could not remove previous Anchor site ${path}."
+    done
 
     # Disable the stock 'default' site once our domain block is enabled. The
     # default site ships with a catch-all server_name (_) and, if certbot ever

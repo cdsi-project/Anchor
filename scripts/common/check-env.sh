@@ -244,7 +244,7 @@ pf_check_database_service() {
         value="Not Installed"
         status="$PF_OK"
     fi
-    pf_print_result "MySQL" "$value" "$status"
+    pf_print_result "Database" "$value" "$status"
     pf_update_status "$status"
 }
 

@@ -30,6 +30,8 @@ bash -n "$DOMAIN_LIB" \
     || fail_test "domain resolution library has invalid Bash syntax"
 grep -Fq 'cdsi_packages_install dnsutils' "$DOMAIN_LIB" \
     || fail_test "Ubuntu DNS validation does not install dig from the system source"
+grep -Fq 'debian) cdsi_packages_install bind9-dnsutils' "$DOMAIN_LIB" \
+    || fail_test "Debian DNS validation does not install dig from the system source"
 grep -Fq 'cdsi_packages_install bind-utils' "$DOMAIN_LIB" \
     || fail_test "CentOS DNS validation does not install dig from the system source"
 if grep -Fq 'getent ahost' "$DOMAIN_LIB"; then

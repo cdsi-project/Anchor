@@ -128,9 +128,13 @@ assert_success "CentOS PHP-FPM service should use systemd" \
     cdsi_service_active php-fpm
 assert_success "CentOS Nginx service should use systemd" \
     cdsi_service_enabled nginx
+assert_success "Debian MariaDB service should use systemd" \
+    cdsi_service_installed mariadb
+assert_success "Debian versioned PHP-FPM service should use systemd" \
+    cdsi_service_active php8.4-fpm
 
 CDSI_SERVICE_BACKEND="unknown"
 assert_failure "unknown service backend unexpectedly succeeded" \
     cdsi_service_active nginx
 
-printf 'PASS: Ubuntu and CentOS Stream systemd service mappings\n'
+printf 'PASS: Ubuntu, Debian, and CentOS Stream systemd service mappings\n'

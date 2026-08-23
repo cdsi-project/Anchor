@@ -159,4 +159,96 @@ fi
 assert_equal "$foreign_before" "$(sha256sum "$site_file" | awk '{print $1}')" \
     "non-Anchor WordPress site path must remain unchanged"
 
+# IP-to-domain migration must remove the enabled symlink before its managed
+# target. Otherwise the link becomes dangling, loses its ownership marker, and
+# makes nginx -t fail even though both paths belonged to Anchor.
+migration_root="${fixture_dir}/nginx-migration"
+migration_available="${migration_root}/sites-available"
+migration_enabled="${migration_root}/sites-enabled"
+mkdir -p "$migration_available" "$migration_enabled"
+cat > "${migration_available}/wordpress.conf" <<'EOF'
+# CDSI WordPress site block - managed by install-wordpress.sh
+server { server_name 192.0.2.10; }
+EOF
+ln -s "${migration_available}/wordpress.conf" \
+    "${migration_enabled}/wordpress.conf"
+
+CDSI_NGINX_SITE_DIR="$migration_available"
+CDSI_NGINX_ENABLED_DIR="$migration_enabled"
+WP_DOMAIN="example.com"
+CDSI_DOMAIN="example.com"
+unset CDSI_PREVIOUS_DOMAIN
+nginx() {
+    local enabled_site
+    for enabled_site in "${CDSI_NGINX_ENABLED_DIR}"/*; do
+        [[ ! -L "$enabled_site" || -e "$enabled_site" ]] || return 1
+    done
+    return 0
+}
+cdsi_service_reload() { return 0; }
+configure_nginx
+
+[[ -f "${migration_available}/example.com.conf" ]] \
+    || fail_test "domain migration did not create the available site"
+[[ -L "${migration_enabled}/example.com.conf" \
+   && -e "${migration_enabled}/example.com.conf" ]] \
+    || fail_test "domain migration did not create a valid enabled site link"
+[[ ! -e "${migration_available}/wordpress.conf" \
+   && ! -L "${migration_enabled}/wordpress.conf" ]] \
+    || fail_test "domain migration retained the legacy IP-mode site"
+
+WP_DOMAIN="next.example.com"
+CDSI_DOMAIN="next.example.com"
+CDSI_PREVIOUS_DOMAIN="example.com"
+configure_nginx
+[[ -f "${migration_available}/next.example.com.conf" \
+   && -L "${migration_enabled}/next.example.com.conf" \
+   && -e "${migration_enabled}/next.example.com.conf" ]] \
+    || fail_test "domain-to-domain migration did not create a valid new site"
+[[ ! -e "${migration_available}/example.com.conf" \
+   && ! -L "${migration_enabled}/example.com.conf" ]] \
+    || fail_test "domain-to-domain migration retained the previous site"
+
+WP_DOMAIN=""
+CDSI_DOMAIN=""
+SERVER_IP="192.0.2.10"
+CDSI_PREVIOUS_DOMAIN="next.example.com"
+configure_nginx
+[[ -f "${migration_available}/wordpress.conf" \
+   && -L "${migration_enabled}/wordpress.conf" \
+   && -e "${migration_enabled}/wordpress.conf" ]] \
+    || fail_test "domain-to-IP migration did not create a valid IP-mode site"
+[[ ! -e "${migration_available}/next.example.com.conf" \
+   && ! -L "${migration_enabled}/next.example.com.conf" ]] \
+    || fail_test "domain-to-IP migration retained the previous domain site"
+
+ip_site_before="$(sha256sum "${migration_available}/wordpress.conf" | awk '{print $1}')"
+ip_link_before="$(readlink "${migration_enabled}/wordpress.conf")"
+if (
+    WP_DOMAIN="broken.example.com"
+    CDSI_DOMAIN="broken.example.com"
+    CDSI_PREVIOUS_DOMAIN=""
+    nginx_calls=0
+    fail() { exit 91; }
+    nginx() {
+        ((nginx_calls += 1))
+        ((nginx_calls > 1))
+    }
+    cdsi_service_reload() { return 0; }
+    configure_nginx
+); then
+    fail_test "invalid IP-to-domain migration unexpectedly succeeded"
+fi
+assert_equal "$ip_site_before" \
+    "$(sha256sum "${migration_available}/wordpress.conf" | awk '{print $1}')" \
+    "failed migration must restore the IP-mode site file"
+assert_equal "$ip_link_before" \
+    "$(readlink "${migration_enabled}/wordpress.conf")" \
+    "failed migration must restore the IP-mode enabled link"
+[[ -e "${migration_enabled}/wordpress.conf" ]] \
+    || fail_test "failed migration restored a dangling IP-mode link"
+[[ ! -e "${migration_available}/broken.example.com.conf" \
+   && ! -L "${migration_enabled}/broken.example.com.conf" ]] \
+    || fail_test "failed migration retained the staged domain site"
+
 printf 'PASS: WordPress PHP reconciliation and transactional Nginx configuration\n'

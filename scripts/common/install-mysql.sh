@@ -5,15 +5,16 @@ if [ -z "${BASH_VERSION:-}" ]; then
         "${_cdsi_script_dir}/$(basename "$0")" "$@"
 fi
 # ═══════════════════════════════════════════════════
-# CDSI Anchor — MySQL Installer
-# Installs MySQL from the operating system's default package source.
+# CDSI Anchor — Database Installer
+# Installs MySQL or MariaDB from the operating system's default package source.
 # After install:
-#   • Sets a password for the MySQL 'root'@'localhost' account
-#     (auth method switched from auth_socket to caching_sha2_password).
+#   • MySQL: sets a random root password with caching_sha2_password.
+#   • MariaDB: preserves Debian's local unix_socket root authentication.
 #   • Creates database `cdsi` and user `cdsi`@localhost with a
 #     random 10-char password.
-#   • Saves both credentials to password/mysql.pass (mode 600),
-#     one entry per line:  root:<password>  and  cdsi:<password>
+#   • Saves the root authentication state and cdsi password to
+#     password/mysql.pass (mode 600). MariaDB records a blank root entry
+#     because local root access continues to use unix_socket.
 #
 # Idempotent: re-running detects the recorded passwords and
 # skips when root/cdsi auth already works.
@@ -58,7 +59,7 @@ source "${CDSI_ROOT}/lib/packages.sh"
 source "${CDSI_ROOT}/lib/services.sh"
 cdsi_platform_init
 cdsi_platform_supported \
-    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS and CentOS Stream 10."
+    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
 
 PASS_DIR="${CDSI_ROOT}/password"
 PASS_FILE="${PASS_DIR}/mysql.pass"
@@ -66,6 +67,11 @@ PASS_FILE="${PASS_DIR}/mysql.pass"
 DB_NAME="cdsi"
 DB_USER="cdsi"
 MYSQL_NETWORK_CONFIG_CHANGED=false
+if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+    DB_LABEL="MariaDB"
+else
+    DB_LABEL="MySQL"
+fi
 
 # ── Password Generation (10-char alphanumeric) ─────────────
 generate_password() {
@@ -104,6 +110,38 @@ write_credentials() {
 }
 
 configure_mysql_network() {
+    if cdsi_is_debian; then
+        local config_file="/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"
+        local temp_file
+        temp_file="$(mktemp "${TMPDIR:-/tmp}/cdsi-mariadb-network.XXXXXX")" \
+            || fail "Could not create a temporary MariaDB network configuration."
+        cat > "$temp_file" <<'MARIADB_NETWORK_CONFIG'
+# Managed by CDSI Anchor. WordPress connects to MariaDB on this host only.
+[mariadbd]
+bind-address=127.0.0.1
+MARIADB_NETWORK_CONFIG
+
+        if [[ -f "$config_file" ]]; then
+            if cmp -s "$temp_file" "$config_file"; then
+                rm -f -- "$temp_file"
+                return 0
+            fi
+            rm -f -- "$temp_file"
+            fail "Existing Anchor MariaDB network configuration differs: ${config_file}. It was not overwritten."
+        fi
+
+        ${SUDO} install -m 0644 "$temp_file" "$config_file" \
+            || { rm -f -- "$temp_file"; fail "Failed to install ${config_file}."; }
+        rm -f -- "$temp_file"
+        if ! ${SUDO} mariadbd --verbose --help >/dev/null 2>&1; then
+            ${SUDO} rm -f -- "$config_file"
+            fail "MariaDB rejected the Anchor local-bind configuration; it was rolled back."
+        fi
+        MYSQL_NETWORK_CONFIG_CHANGED=true
+        log "Configured MariaDB to listen on 127.0.0.1 only."
+        return 0
+    fi
+
     cdsi_is_centos_stream || return 0
 
     local config_file="/etc/my.cnf.d/zz-cdsi-anchor.cnf"
@@ -138,37 +176,39 @@ MYSQL_NETWORK_CONFIG
 }
 
 verify_mysql_local_listeners() {
-    cdsi_is_centos_stream || return 0
+    if ! cdsi_is_centos_stream && ! cdsi_is_debian; then
+        return 0
+    fi
     command -v ss >/dev/null 2>&1 \
-        || fail "ss is required to verify the MySQL network boundary."
+        || fail "ss is required to verify the database network boundary."
 
-    local address found_mysql=false
+    local address found_database=false
     local -a listeners=()
     mapfile -t listeners < <(
         ${SUDO} ss -ltnpH 2>/dev/null \
-            | awk '/mysqld/ {print $4}'
+            | awk '/mysqld|mariadbd/ {print $4}'
     )
     for address in "${listeners[@]}"; do
         case "$address" in
-            127.0.0.1:3306)
-                found_mysql=true
+            127.0.0.1:3306|\[::1\]:3306)
+                found_database=true
                 ;;
             127.0.0.1:33060)
                 ;;
             *)
-                fail "MySQL has a non-local TCP listener (${address}); existing network configuration was not considered safe."
+                fail "${DB_LABEL} has a non-local TCP listener (${address}); existing network configuration was not considered safe."
                 ;;
         esac
     done
-    [[ "$found_mysql" == true ]] \
-        || fail "MySQL is not listening on the expected local address 127.0.0.1:3306."
-    log_ok "MySQL TCP listeners are restricted to 127.0.0.1."
+    [[ "$found_database" == true ]] \
+        || fail "${DB_LABEL} is not listening on the expected local address 127.0.0.1:3306."
+    log_ok "${DB_LABEL} TCP listeners are restricted to localhost."
 }
 
 # ── Service state ──────────────────────────────────────────
 ensure_mysql_running() {
     cdsi_service_installed "${CDSI_MYSQL_SERVICE}" \
-        || fail "MySQL service '${CDSI_MYSQL_SERVICE}' is not installed."
+        || fail "${DB_LABEL} service '${CDSI_MYSQL_SERVICE}' is not installed."
 
     cdsi_service_enable "${CDSI_MYSQL_SERVICE}" \
         || fail "Failed to enable ${CDSI_MYSQL_SERVICE} at boot."
@@ -178,16 +218,16 @@ ensure_mysql_running() {
         return 0
     fi
 
-    log "MySQL is installed but not running - starting ${CDSI_MYSQL_SERVICE}..."
+    log "${DB_LABEL} is installed but not running - starting ${CDSI_MYSQL_SERVICE}..."
     cdsi_service_start "${CDSI_MYSQL_SERVICE}" \
         || fail "Failed to start ${CDSI_MYSQL_SERVICE}."
     cdsi_service_active "${CDSI_MYSQL_SERVICE}" \
         || fail "${CDSI_MYSQL_SERVICE} did not reach the active state."
-    log_ok "MySQL started."
+    log_ok "${DB_LABEL} started."
 }
 
 wait_for_mysql() {
-    log "Waiting for MySQL to accept connections..."
+    log "Waiting for ${DB_LABEL} to accept connections..."
     local ready=0
     local i
     for i in $(seq 1 60); do
@@ -198,8 +238,8 @@ wait_for_mysql() {
         fi
         sleep 1
     done
-    [[ "$ready" -eq 1 ]] || fail "MySQL did not become ready in time."
-    log_ok "MySQL is up."
+    [[ "$ready" -eq 1 ]] || fail "${DB_LABEL} did not become ready in time."
+    log_ok "${DB_LABEL} is up."
     verify_mysql_local_listeners
 }
 
@@ -215,6 +255,9 @@ reconcile_mysql_runtime() {
             || fail "${CDSI_MYSQL_SERVICE} did not return to the active state."
     fi
     wait_for_mysql
+    # The staged network policy is active after either the initial service
+    # start or the restart above. Do not restart again on a recovery pass.
+    MYSQL_NETWORK_CONFIG_CHANGED=false
 }
 
 MYSQL_SERVICE_WAS_ACTIVE=false
@@ -223,20 +266,27 @@ if cdsi_service_active "${CDSI_MYSQL_SERVICE}"; then
 fi
 
 # ── Idempotency / skip ────────────────────────────────────
-# Fully done when MySQL is installed, the credential file records BOTH
-# root and cdsi passwords, and we can connect as root with that password.
+# Fully done when the database is installed, the credential file records the
+# platform root-auth state and cdsi password, and both connections succeed.
 if command -v mysql >/dev/null 2>&1 \
    && cdsi_service_installed "${CDSI_MYSQL_SERVICE}" \
    && [[ -f "$PASS_FILE" ]]; then
     reconcile_mysql_runtime
     STORED_ROOT="$(stored_cred root)"
     STORED_CDSI="$(stored_cred cdsi)"
-    if [[ -n "$STORED_ROOT" && -n "$STORED_CDSI" ]] \
-       && mysql -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1 \
+    ROOT_AUTH_READY=false
+    if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+        ${SUDO} mysql -u root -e "SELECT 1" >/dev/null 2>&1 \
+            && ROOT_AUTH_READY=true
+    elif [[ -n "$STORED_ROOT" ]] \
+         && mysql -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1; then
+        ROOT_AUTH_READY=true
+    fi
+    if [[ "$ROOT_AUTH_READY" == true && -n "$STORED_CDSI" ]] \
        && mysql -u "${DB_USER}" -p"$STORED_CDSI" -D "$DB_NAME" \
             -e "SELECT 1" >/dev/null 2>&1; then
-        log "MySQL is already installed and root/cdsi passwords are set."
-        log_ok "MySQL is already running."
+        log "${DB_LABEL} is already installed and the Anchor database credentials are valid."
+        log_ok "${DB_LABEL} is already running."
         exit 0
     fi
     # Do not guess or reset authentication for an existing server. The only
@@ -246,6 +296,11 @@ fi
 # ── Install MySQL (if not present) ─────────────────────────
 if cdsi_is_centos_stream && cdsi_package_installed mariadb-server; then
     fail "MariaDB Server is already installed. Anchor will not replace an existing database server with MySQL 8.4."
+fi
+if cdsi_is_debian && command -v mysql >/dev/null 2>&1 \
+   && ! cdsi_service_installed mariadb \
+   && { cdsi_service_installed mysql || cdsi_service_installed mysqld; }; then
+    fail "An unsupported database server is already installed. Anchor will not replace it with Debian's default MariaDB service."
 fi
 
 if ! command -v mysql >/dev/null 2>&1 \
@@ -264,7 +319,7 @@ if ! command -v mysql >/dev/null 2>&1 \
     cdsi_service_installed "${CDSI_MYSQL_SERVICE}" \
         || fail "${MYSQL_PACKAGE} did not install service '${CDSI_MYSQL_SERVICE}'."
 
-    log_ok "MySQL package installed."
+    log_ok "${DB_LABEL} package installed."
 fi
 
 reconcile_mysql_runtime
@@ -283,8 +338,15 @@ fi
 log "Generating random 10-character passwords..."
 ROOT_NEEDS_ALTER=true
 ROOT_AUTH_MODE=""
-if [[ -n "$STORED_ROOT" ]] \
-   && mysql -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1; then
+if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+    ${SUDO} mysql -u root -e "SELECT 1" >/dev/null 2>&1 \
+        || fail "MariaDB local unix_socket root authentication is unavailable. Existing root authentication was not changed."
+    ROOT_PASSWORD=""
+    ROOT_NEEDS_ALTER=false
+    ROOT_AUTH_MODE="socket"
+    log "  Preserving MariaDB root unix_socket authentication."
+elif [[ -n "$STORED_ROOT" ]] \
+     && mysql -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1; then
     ROOT_PASSWORD="$STORED_ROOT"
     ROOT_NEEDS_ALTER=false
     ROOT_AUTH_MODE="stored"
@@ -336,11 +398,12 @@ ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${ROOT_P
 SQL
     mysql -u root -p"${ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1 \
         || fail "MySQL root password changed, but the stored credential could not be verified."
+    ROOT_AUTH_MODE="stored"
 fi
 
 # ── Provision database + application user ─────────────────
 log "Provisioning database and application user..."
-mysql -u root -p"${ROOT_PASSWORD}" <<SQL
+mysql_as_current_root <<SQL
 CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${CDSI_PASSWORD}';
 ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${CDSI_PASSWORD}';
@@ -350,11 +413,11 @@ SQL
 
 # ── Verify connections ────────────────────────────────────
 log "Verifying connections..."
-if mysql -u root -p"${ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
+if mysql_as_current_root -e "SELECT 1" >/dev/null 2>&1; then
     log_ok "  root@localhost auth: OK"
 else
-    log_fail "Authentication as root failed."
-    fail "root password verification failed."
+    log_fail "${DB_LABEL} root authentication failed."
+    fail "root authentication verification failed."
 fi
 if mysql -u "${DB_USER}" -p"${CDSI_PASSWORD}" -D "$DB_NAME" \
     -e "SELECT 1" >/dev/null 2>&1; then
@@ -365,14 +428,22 @@ else
 fi
 
 # ── Summary ───────────────────────────────────────────────
-log_ok "MySQL installation complete."
+log_ok "${DB_LABEL} installation complete."
 log "  Version:         $(mysql -V | awk '{print $3}')"
 log "  Service:         active (enabled on boot)"
 log "  Database:        ${DB_NAME} (utf8mb4)"
 log "  User:            ${DB_USER}@localhost"
-log "  Root auth:       caching_sha2_password (password set)"
+if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+    log "  Root auth:       unix_socket (no root password stored)"
+else
+    log "  Root auth:       caching_sha2_password (password set)"
+fi
 log "  Credentials file: ${PASS_FILE} (mode 600)"
-log "    root:${ROOT_PASSWORD}"
+if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+    log "    root:<unix_socket>"
+else
+    log "    root:${ROOT_PASSWORD}"
+fi
 log "    cdsi:${CDSI_PASSWORD}"
 
 exit 0

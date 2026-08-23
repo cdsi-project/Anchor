@@ -124,7 +124,7 @@ Users should not need deep knowledge of:
 - Linux
 - Nginx
 - PHP-FPM
-- MySQL
+- MySQL / MariaDB
 - Redis
 - Supervisor
 - SSL
@@ -145,13 +145,13 @@ The project is currently in:
 Current priority:
 
 > Make the implemented WordPress OpenWeb installation path reliable on clean
-> and partially configured supported Ubuntu and CentOS Stream servers.
+> and partially configured supported Ubuntu, Debian, and CentOS Stream servers.
 
 The current working baseline already includes:
 
 - preflight, logging, and component orchestration in `install.sh`
-- Nginx, MySQL, PHP-FPM, Certbot, and WordPress installation
-- Ubuntu APT and CentOS DNF package backends with bounded retry
+- Nginx, MySQL/MariaDB, PHP-FPM, Certbot, and WordPress installation
+- Ubuntu/Debian APT and CentOS DNF package backends with bounded retry
 - system-default base stack packages and explicitly bounded EPEL use on CentOS
 - strict A/AAAA domain activation with separate active and pending state
 - standalone domain and HTTPS configuration, including capability-gated IP TLS
@@ -160,7 +160,8 @@ The current working baseline already includes:
 - component and full uninstall workflows
 
 Redis and Supervisor remain independently runnable compatibility scripts, but
-they are intentionally hidden from the main menu and Install All flow.
+they are Ubuntu-only and intentionally hidden from the main menu and Install
+All flow.
 
 The current engineering focus is NOT yet:
 
@@ -184,10 +185,10 @@ Do not expand scope into these areas unless explicitly requested.
 The implemented default deployment stack is:
 
 ```text
-OS           Ubuntu Server 24.04/26.04 LTS or CentOS Stream 10
+OS           Ubuntu Server 24.04/26.04 LTS, Debian 13, or CentOS Stream 10
 Web          Nginx
-Runtime      PHP-FPM
-Database     MySQL
+Runtime      PHP-FPM; Debian 13 uses PHP 8.4
+Database     MySQL on Ubuntu/CentOS; MariaDB 11.8 on Debian 13
 SSL          Let's Encrypt / Certbot for verified domains; explicit supported public IPs
 OpenWeb      WordPress
 Integration  CDSI Beacon WordPress Application Password
@@ -197,7 +198,7 @@ The following distinctions are mandatory when documenting or changing the
 repository:
 
 ```text
-Default flow     Nginx, MySQL, PHP-FPM, Certbot, WordPress
+Default flow     Nginx, MySQL/MariaDB, PHP-FPM, Certbot, WordPress
 Standalone only  Redis, Supervisor
 Planned          Composer, CDSI Core deployment, cdsi CLI/doctor
 ```
@@ -207,12 +208,28 @@ The first version intentionally supports a narrow deployment path.
 CentOS Stream 10 must keep these explicit boundaries:
 
 - use BaseOS/AppStream for Nginx, MySQL 8.4, PHP-FPM, and required PHP modules
-- use EPEL only for Certbot and optional Imagick; never enable Remi
+- use EPEL only for Certbot; never enable Remi
 - never disable SELinux; when it is enabled, add persistent, recorded WordPress policy state
 - modify firewalld only when it is active, and record the exact runtime or
   permanent layer for every Anchor-added service
 - use `apache:apache` for WordPress/FPM ownership and the packaged Nginx socket ACL
 - keep Redis and Supervisor unavailable on the CentOS route
+
+Debian 13 must keep these explicit boundaries:
+
+- use the system default APT repositories for the base stack
+- install `default-mysql-server`, which resolves to MySQL-compatible MariaDB
+  11.8; use the `mariadb` service and MariaDB-compatible SQL
+- keep the Anchor-owned bind configuration scoped to
+  `/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf`; do not emit MySQL X settings or
+  MySQL-only authentication clauses such as `caching_sha2_password`
+- use the default PHP 8.4 stream and resolve versioned extension packages when
+  an unversioned metapackage has no candidate
+- use the default Certbot 4.0 packages for domain HTTPS; this version does not
+  satisfy the Certbot 5.4+ public-IP certificate capability, so preserve HTTP
+  for unsupported IP requests
+- use `www-data:www-data` for WordPress/FPM ownership
+- keep Redis and Supervisor unavailable on the Debian route
 
 Do NOT claim or prematurely implement support for:
 
@@ -220,7 +237,7 @@ Do NOT claim or prematurely implement support for:
 - CentOS Linux
 - Rocky Linux
 - AlmaLinux
-- arbitrary Debian variants
+- Debian releases other than 13
 - Apache
 - PostgreSQL
 - Docker
@@ -249,7 +266,7 @@ Responsible for server provisioning and the OpenWeb installation lifecycle.
 Examples:
 
 - operating system checks
-- Nginx, PHP-FPM, MySQL, Certbot, and WordPress installation
+- Nginx, PHP-FPM, MySQL/MariaDB, Certbot, and WordPress installation
 - domain and service configuration
 - generated credentials and final access reporting
 - safe reruns, uninstall, and infrastructure verification
@@ -298,7 +315,7 @@ Anchor/
 │   ├── configure-https.sh        # independent domain/IP TLS lifecycle
 │   ├── common/                   # shared component implementations
 │   ├── ubuntu/                   # implemented platform route
-│   ├── debian/                   # planned boundary only
+│   ├── debian/                   # implemented Debian 13 platform route
 │   ├── centos-stream/            # implemented platform route
 │   ├── configure.sh
 │   └── health.sh
@@ -310,9 +327,8 @@ Anchor/
 
 `install.sh` owns user interaction and orchestration. Public component commands
 under `scripts/` detect the operating system and dispatch to a platform route.
-The `ubuntu/` and `centos-stream/` routes are implemented. Their wrappers invoke
-the shared implementations under `scripts/common/`; `debian/` reserves a future
-boundary and must return unsupported until explicitly implemented.
+The `ubuntu/`, `debian/`, and `centos-stream/` routes are implemented. Their
+wrappers invoke the shared implementations under `scripts/common/`.
 Shared primitives belong under `lib/`. Keep these layers small and
 responsibility-focused.
 
@@ -358,7 +374,7 @@ Expected behavior:
 ```text
 Nginx             Installed        SKIP
 PHP               Installed        SKIP
-MySQL Database    Exists           SKIP
+Database          Exists           SKIP
 WordPress         Installed        SKIP / VERIFY
 SSL               Valid            SKIP
 ```
@@ -383,7 +399,7 @@ Security defaults must be conservative.
 
 Agents MUST NOT:
 
-- use MySQL root as the CDSI application user
+- use MySQL/MariaDB root as the CDSI application user
 - use `chmod -R 777`
 - expose secrets in logs
 - hardcode production passwords
@@ -547,14 +563,14 @@ At minimum inspect:
 - ports 80/443
 - existing Nginx
 - existing PHP
-- existing MySQL
+- existing MySQL/MariaDB
 - existing Redis/Supervisor when present as legacy or standalone components
 
 Do not modify the server before critical compatibility checks pass.
 
 The active preflight is `scripts/check-env.sh` and accepts only Ubuntu
-24.04/26.04 or CentOS Stream 10 on `x86_64`/`aarch64`. Every default component
-script enforces the same platform guard when run independently.
+24.04/26.04, Debian 13, or CentOS Stream 10 on `x86_64`/`aarch64`. Every default
+component script enforces the same platform guard when run independently.
 
 ---
 
@@ -612,8 +628,9 @@ Public IP certificates require a globally routable IPv4, system Certbot 5.4 or
 newer with both `--ip-address` and `--preferred-profile`, and the Let's Encrypt
 `shortlived` profile. If any capability is absent, preserve HTTP. Do not claim
 that the current CentOS Stream EPEL Certbot necessarily supports IP
-certificates, do not install an untrusted certificate as a substitute, and do
-not send IP certificate orders to a fallback CA.
+certificates. Debian 13's default Certbot 4.0 supports domain certificates but
+does not meet the public-IP requirement. Do not install an untrusted certificate
+as a substitute, and do not send IP certificate orders to a fallback CA.
 
 The optional `CDSI_ACME_FALLBACK_SERVER` is selected only when the primary ACME
 directory cannot be reached after bounded probes. It must never be selected in
@@ -626,7 +643,7 @@ persisted in repository files or logs.
 
 # 15. Database Rules
 
-The installed WordPress site must use a dedicated MySQL account.
+The installed WordPress site must use a dedicated MySQL or MariaDB account.
 
 Never use:
 
@@ -639,7 +656,7 @@ as the normal application database account.
 Installer responsibilities:
 
 ```text
-install MySQL
+install the platform database server
 create database
 create dedicated application user
 generate password
@@ -650,7 +667,7 @@ verify WordPress/database connectivity
 
 Verification must test actual application/database connectivity where possible.
 
-A running MySQL process alone is not sufficient.
+A running database process alone is not sufficient.
 
 ---
 
@@ -678,7 +695,7 @@ If validation fails:
 
 Use templates where practical.
 
-Successful Nginx, MySQL, and PHP-FPM installation requires both an active
+Successful Nginx, MySQL/MariaDB, and PHP-FPM installation requires both an active
 runtime service and systemd boot enablement. Reconcile and verify both states on
 fresh installs and fast reruns. When a certificate is configured, the packaged
 `certbot.timer` or `certbot-renew.timer` must also be active and enabled; an
@@ -695,15 +712,17 @@ deploy hook so successful renewals safely reload Nginx.
 
 Use the default PHP stream available from the supported operating system. Do not
 add third-party PHP PPAs or Remi, force a global PHP alternative, or assume a
-versioned package exists without resolving the platform runtime. On CentOS,
-EPEL may be enabled only through the shared helper for packages that are not in
-BaseOS/AppStream; the current PHP use is optional Imagick.
+versioned package exists without resolving the platform runtime. On CentOS, PHP
+packages and extensions must remain in BaseOS/AppStream; the PHP installer must
+not enable EPEL. Debian 13 uses PHP 8.4 from the default repository; when an
+unversioned extension package has no candidate, use the matching versioned
+system package rather than a third-party repository.
 
 The fresh-install path requires the extensions used by WordPress and Beacon's
 OpenWeb workflow, including `mysqli`, cURL, XML, mbstring, ZIP, GD, Redis, and
-OPcache. Imagick is optional when the system repository does not provide it.
-Checks for an existing PHP installation must not claim extensions were installed
-unless they were actually verified.
+OPcache. GD is the supported image-processing extension; do not install Imagick.
+Checks for an existing PHP installation must not claim extensions were
+installed unless they were actually verified.
 
 ---
 
@@ -750,9 +769,9 @@ validate three levels.
 ```text
 Nginx
 PHP-FPM
-MySQL
+MySQL/MariaDB
 WordPress
-Nginx/MySQL/PHP-FPM runtime active and boot enabled
+Nginx/database/PHP-FPM runtime active and boot enabled
 Certbot renewal timer active and enabled when TLS is configured
 Redis/Supervisor when explicitly installed
 ```
@@ -837,7 +856,7 @@ Implemented:
 
 ```text
 Preflight and logging
-Nginx / MySQL / PHP-FPM / Certbot / WordPress
+Nginx / MySQL or MariaDB / PHP-FPM / Certbot / WordPress
 Domain-aware HTTP/HTTPS setup
 Strict A/AAAA activation with active/pending domain state
 Independent domain clear/activate and domain/IP HTTPS commands
@@ -845,6 +864,7 @@ Directory-only ACME fallback and capability-gated short-lived IP certificates
 Active/enabled service and certificate-renewal timer verification
 APT/DNF package installation with bounded retry
 CentOS Stream 10 platform route with MySQL 8.4 and explicit EPEL boundaries
+Debian 13 platform route with MariaDB 11.8, PHP 8.4, and Certbot 4.0 boundaries
 Pinned SHA-256 verification for WP-CLI and WordPress downloads
 WordPress administrator and Beacon Application Password provisioning
 Final access report
@@ -866,7 +886,6 @@ cdsi CLI / doctor / update
 resume checkpoints
 complete server backup and restore
 automated fresh-server/reinstall/reboot integration coverage in this repository
-Debian component implementations
 ```
 
 Current work should prioritize clean-server regression testing, safe reruns,

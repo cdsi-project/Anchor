@@ -44,6 +44,15 @@ assert_equal \
     "Ubuntu PHP base package plan"
 
 set_platform_fixture \
+    debian "13" "Debian GNU/Linux 13 (trixie)" apt \
+    /usr/bin/php "" "" ""
+mapfile -t packages < <(php_base_packages)
+assert_equal \
+    "php-cli php-fpm php-common php-curl php-mbstring php-xml php-zip php-bcmath php-intl php-mysql" \
+    "${packages[*]}" \
+    "Debian PHP base package plan"
+
+set_platform_fixture \
     centos-stream "10" "CentOS Stream 10" dnf \
     /usr/bin/php /usr/sbin/php-fpm php-fpm \
     unix:/run/php-fpm/www.sock
@@ -78,6 +87,20 @@ assert_equal "gd|true|php-gd php8.5-gd" \
 
 extension_calls=()
 set_platform_fixture \
+    debian "13" "Debian GNU/Linux 13 (trixie)" apt \
+    /usr/bin/php "" "" ""
+install_required_php_extensions "8.4"
+assert_equal "3" "${#extension_calls[@]}" \
+    "Debian required extension call count"
+assert_equal "Zend OPcache|true|php-opcache php8.4-opcache" \
+    "${extension_calls[0]}" "Debian OPcache candidates"
+assert_equal "redis|true|php-redis php8.4-redis" \
+    "${extension_calls[1]}" "Debian Redis candidates"
+assert_equal "gd|true|php-gd php8.4-gd" \
+    "${extension_calls[2]}" "Debian GD candidates"
+
+extension_calls=()
+set_platform_fixture \
     centos-stream "10" "CentOS Stream 10" dnf \
     /usr/bin/php /usr/sbin/php-fpm php-fpm \
     unix:/run/php-fpm/www.sock
@@ -93,51 +116,16 @@ assert_equal "gd|true|php-gd" \
 assert_equal "zip|true|php-pecl-zip" \
     "${extension_calls[3]}" "CentOS ZIP package"
 
-optional_order=()
-php_extension_loaded() { return 1; }
-cdsi_enable_epel() {
-    optional_order+=(epel)
-}
-install_php_extension() {
-    optional_order+=("install:$1|$2|${*:3}")
-}
-install_optional_imagick "8.3" >/dev/null
-assert_equal "epel install:imagick|false|php-pecl-imagick" \
-    "${optional_order[*]}" \
-    "CentOS Imagick must enable EPEL before package installation"
-
-optional_order=()
-cdsi_enable_epel() {
-    optional_order+=(epel)
-    return 1
-}
-install_optional_imagick "8.3" >/dev/null 2>&1
-assert_equal "epel" "${optional_order[*]}" \
-    "Imagick must remain optional when EPEL cannot be enabled"
-
-set_platform_fixture \
-    ubuntu "24.04" "Ubuntu 24.04 LTS" apt \
-    /usr/bin/php "" "" ""
-optional_order=()
-cdsi_enable_epel() {
-    optional_order+=(epel)
-}
-install_php_extension() {
-    optional_order+=("install:$1|$2|${*:3}")
-}
-install_optional_imagick "8.3" >/dev/null
-assert_equal "install:imagick|false|php-imagick php8.3-imagick" \
-    "${optional_order[*]}" \
-    "Ubuntu Imagick candidates and repository behavior"
-
 fixture_dir="$(mktemp -d)"
 trap 'rm -rf -- "$fixture_dir"' EXIT
 printf '#!/bin/sh\nprintf "8.3\\n"\n' > "${fixture_dir}/php"
 printf '#!/bin/sh\nexit 0\n' > "${fixture_dir}/php-fpm"
+printf '#!/bin/sh\nexit 0\n' > "${fixture_dir}/php-fpm8.4"
 printf '#!/bin/sh\nexit 0\n' > "${fixture_dir}/php-fpm8.5"
 chmod 0755 \
     "${fixture_dir}/php" \
     "${fixture_dir}/php-fpm" \
+    "${fixture_dir}/php-fpm8.4" \
     "${fixture_dir}/php-fpm8.5"
 
 set_platform_fixture \
@@ -178,10 +166,32 @@ assert_equal "8.5" "$PHP_VERSION" "Ubuntu PHP version resolution"
 assert_equal "/usr/bin/php8.5" "$PHP_BIN" "Ubuntu PHP binary resolution"
 assert_equal "php8.5-fpm" "$FPM_PACKAGE" "Ubuntu FPM package resolution"
 
+set_platform_fixture \
+    debian "13" "Debian GNU/Linux 13 (trixie)" apt \
+    /usr/bin/php "" "" ""
+assert_equal "${fixture_dir}/php-fpm8.4" "$(resolve_fpm_bin "8.4")" \
+    "Debian versioned PHP-FPM binary"
+function dpkg-query() {
+    printf 'called\n' >> "$dpkg_query_log"
+    printf 'php8.4-fpm (>= 8.4.0)\n'
+}
+: > "$dpkg_query_log"
+resolve_installed_php_runtime
+assert_equal "1" "$(wc -l < "$dpkg_query_log" | tr -d '[:space:]')" \
+    "Debian runtime resolution must inspect the php-fpm metapackage"
+assert_equal "8.4" "$PHP_VERSION" "Debian PHP version resolution"
+assert_equal "/usr/bin/php8.4" "$PHP_BIN" "Debian PHP binary resolution"
+assert_equal "php8.4-fpm" "$FPM_PACKAGE" "Debian FPM package resolution"
+
 PHP_INSTALLER="${TEST_ROOT}/scripts/common/install-php.sh"
+if grep -Eqi 'imagick|cdsi_enable_epel' "$PHP_INSTALLER"; then
+    fail_test "PHP installer must not install Imagick or enable EPEL"
+fi
+grep -Fq 'packages\.sury\.org/php' "$PHP_INSTALLER" \
+    || fail_test "Debian PHP path must reject packages.sury.org/php"
 grep -Fq 'cdsi_service_enable_now "$current_fpm_service"' "$PHP_INSTALLER" \
     || fail_test "healthy PHP fast path must enable PHP-FPM at boot"
 grep -Fq 'cdsi_service_restart "$FPM_SERVICE"' "$PHP_INSTALLER" \
     || fail_test "PHP reconciliation must restart FPM after extension installation"
 
-printf 'PASS: Ubuntu and CentOS Stream PHP package, extension, and FPM mappings\n'
+printf 'PASS: Ubuntu, Debian, and CentOS Stream PHP package, extension, and FPM mappings\n'

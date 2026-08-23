@@ -46,7 +46,7 @@ fi
 
 cdsi_platform_init
 if ! cdsi_platform_supported; then
-    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS and CentOS Stream 10."
+    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
 fi
 
 resolve_nginx_bin() {
@@ -68,10 +68,11 @@ resolve_nginx_bin() {
 
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required."
 
-if cdsi_is_ubuntu; then
+if cdsi_is_apt_family; then
     command -v apt-get >/dev/null 2>&1 || fail "apt-get is required."
 
-    # Do not silently mix nginx.org or PPA packages with Ubuntu's packages.
+    # Do not silently mix nginx.org or Ubuntu PPA packages with the selected
+    # operating system's default APT packages.
     for source_file in \
         /etc/apt/sources.list \
         /etc/apt/sources.list.d/*.list \

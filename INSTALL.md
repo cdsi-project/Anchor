@@ -8,7 +8,7 @@
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Ubuntu Server 24.04/26.04 LTS，或 CentOS Stream 10 |
+| 操作系统 | Ubuntu Server 24.04/26.04 LTS、Debian 13，或 CentOS Stream 10 |
 | 架构 | `x86_64` 或 `aarch64` |
 | 权限 | root 或 sudo 用户 |
 | CPU | 最低 1 核 |
@@ -22,15 +22,24 @@
 申请 Let's Encrypt 证书。没有域名也能安装，默认通过 `http://<服务器 IP>`
 访问。主安装器需要交互式终端；组件和配置脚本可独立运行。
 
-Nginx、MySQL 和 PHP 基础栈使用操作系统默认软件源。Ubuntu 路径检测到
-nginx.org、Ondrej PHP/Nginx PPA 等冲突源时会停止并提示先移除，不会静默
-改写服务器的软件源。CentOS 路径不启用 Remi；Certbot 和可选 Imagick 需要
-EPEL，安装器只会从 CentOS Extras 安装 `epel-release`，并记录由 Anchor 添加
-的仓库状态。
+Nginx、数据库和 PHP 基础栈使用操作系统默认软件源。Ubuntu/Debian 路径检测到
+nginx.org、Ondrej/Sury PHP 等冲突源时会停止并提示先移除，不会静默改写服务器
+的软件源。Debian 13 默认安装 `default-mysql-server` 提供的 MySQL-compatible
+MariaDB 11.8、PHP 8.4 和 Certbot 4.0。CentOS 路径不启用 Remi；Certbot 需要
+EPEL，安装器只会从 CentOS
+Extras 安装 `epel-release`，并记录由 Anchor 添加的仓库状态。PHP 图片处理使用
+GD，不安装 Imagick。
 
 ---
 
 ## 2. 快速安装
+
+Debian 13 最小化系统在克隆仓库前先准备 Git 和 CA 证书：
+
+```bash
+sudo apt update
+sudo apt install -y git ca-certificates
+```
 
 三步搞定：
 
@@ -212,7 +221,8 @@ IP HTTPS 不是默认安装行为，并同时要求：
 
 系统 Certbot 不满足能力要求时，命令会失败并保持原有 HTTP 站点。Anchor 使用
 操作系统仓库提供的 Certbot，不额外承诺 CentOS Stream 10 当前 EPEL 包一定支持
-IP 证书，也不会用自签名证书冒充公信 HTTPS。
+IP 证书。Debian 13 默认源的 Certbot 4.0 支持域名 HTTPS，但不满足 IP 证书要求
+的 5.4+ 能力。Anchor 不会用自签名证书冒充公信 HTTPS。
 
 ### 4.4 备用 ACME CA
 
@@ -280,7 +290,7 @@ sudo bash scripts/configure-https.sh example.com
   应用密码: ************************
 ```
 
-Nginx、MySQL 与 PHP-FPM 只有同时达到 `active` 和 `enabled` 才算完成：服务
+Nginx、数据库与 PHP-FPM 只有同时达到 `active` 和 `enabled` 才算完成：服务
 当前正在运行，并会在服务器重启后自动启动。HTTPS 配置成功时，系统提供的
 `certbot.timer` 或 `certbot-renew.timer` 也必须同时为 active/enabled；找不到
 或无法启用续期 timer 时，HTTPS 配置会明确失败，而不会报告自动续期已完成。
@@ -289,7 +299,7 @@ Nginx、MySQL 与 PHP-FPM 只有同时达到 `active` 和 `enabled` 才算完成
 
 | 文件 | 内容 |
 |------|------|
-| `password/mysql.pass` | MySQL root 密码 + cdsi 用户密码 |
+| `password/mysql.pass` | 数据库 root 认证状态 + cdsi 用户密码；Debian 的空 `root:` 表示保留 MariaDB `unix_socket` 认证 |
 | `password/redis.pass` | Redis 密码（仅独立安装 Redis 时存在） |
 | `password/wordpress.pass` | WordPress 管理员用户名 + 登录密码 |
 | `password/wordpress-beacon.pass` | CDSI Beacon 用户名 + WordPress Application Password |
@@ -325,11 +335,11 @@ sudo bash scripts/install-supervisor.sh
 验证仍可能继续执行。日常域名或证书变更优先使用 `configure-domain.sh` 和
 `configure-https.sh`，不需要重装 WordPress 或其他基础服务。
 
-默认组件的公开脚本会先检测操作系统，再进入平台目录。Ubuntu 24.04/26.04 与
-CentOS Stream 10 路由已实现；Debian 目录仍是规划边界，脚本会在修改系统前
-返回不支持。Redis 与 Supervisor 兼容脚本仍仅支持 Ubuntu。
+默认组件的公开脚本会先检测操作系统，再进入平台目录。Ubuntu 24.04/26.04、
+Debian 13 与 CentOS Stream 10 路由均已实现。Redis 与 Supervisor 兼容脚本仍
+仅支持 Ubuntu。
 
-所有安装脚本的 `apt-get` 操作都带有有界重试。遇到系统启动后的
+Ubuntu 和 Debian 安装脚本的 `apt-get` 操作都带有有界重试。遇到系统启动后的
 `unattended-upgrades`、`apt-daily` 等进程占用 DPKG 锁时，单次最多等待
 120 秒，失败后间隔 10 秒重试，最多执行 3 次。安装器不会删除锁文件、
 终止系统更新进程，也不会因 DPKG 锁无限等待。
@@ -347,7 +357,7 @@ SELinux 不会被关闭；启用状态下会为 WordPress 配置持久文件上�
 Redis 和 Supervisor 暂不出现在 `install.sh` 的交互菜单和“安装全部”流程中；
 兼容脚本 `scripts/install-redis.sh` 与 `scripts/install-supervisor.sh` 仍保留，
 仅可在受支持 Ubuntu 上按需独立运行。卸载菜单仍保留对应选项，用于清理
-Ubuntu 历史版本或独立安装的服务；CentOS 路径会保护性跳过这两项。
+Ubuntu 历史版本或独立安装的服务；Debian 与 CentOS 路径会保护性跳过这两项。
 
 WP-CLI 与 WordPress 安装包优先从国内 CDN 下载。所有来源下载的文件都必须
 匹配仓库中的 `SHA256SUMS` 才会安装或解压；校验失败时会丢弃文件并尝试
@@ -372,7 +382,7 @@ sudo ./uninstall.sh --dry-run mysql
 sudo ./uninstall.sh --yes all
 ```
 
-单项和全量卸载都是破坏性操作。卸载器没有安装来源清单，会按包名和固定路径处理服务器上的全局资源：例如 MySQL 卸载会删除整个 `/var/lib/mysql`；CentOS 上只额外删除 Anchor 自有的 `/etc/my.cnf.d/zz-cdsi-anchor.cnf`，不会删除 `/etc/my.cnf` 或整个 `/etc/my.cnf.d`。Certbot 卸载会处理 `/etc/letsencrypt` 中的全部证书，WordPress 卸载会删除全局 `/usr/local/bin/wp`，Nginx/PHP/Redis 也会按包名清理。它只适用于专用 CDSI 测试/节点服务器，不适合同时承载其他网站、数据库或共享运行时的混合服务器。
+单项和全量卸载都是破坏性操作。卸载器没有安装来源清单，会按包名和固定路径处理服务器上的全局资源：例如 MySQL/MariaDB 卸载会删除整个 `/var/lib/mysql`；CentOS 上只额外删除 Anchor 自有的 `/etc/my.cnf.d/zz-cdsi-anchor.cnf`，Debian 上只额外删除 `/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf`，不会删除平台的整个数据库配置目录。Certbot 卸载会处理 `/etc/letsencrypt` 中的全部证书，WordPress 卸载会删除全局 `/usr/local/bin/wp`，Nginx/PHP/Redis 也会按包名清理。它只适用于专用 CDSI 测试/节点服务器，不适合同时承载其他网站、数据库或共享运行时的混合服务器。
 
 先对准备执行的同一目标运行 `--dry-run` 并核对输出；`--yes` 只应在已备份且确认清理范围后使用。卸载会清理所选组件的密码文件，但保留仓库中的 `config/domain`、`config/domain.pending` 和独立配置助手创建的 `/etc/cdsi`，便于审计或重装。全量卸载仅在 `/etc/cdsi/epel-added` 存在且内容有效时删除 Anchor 添加的 EPEL；预先存在的 EPEL 不会被移除。
 
@@ -465,11 +475,13 @@ sudo bash scripts/configure-https.sh --ip
 它要求系统 Certbot 5.4+，使用有效期约 6 天的 Let's Encrypt short-lived
 证书，并依赖 active/enabled 的自动续期 timer。系统包版本不足、IP 不是公网
 地址或 ACME directory 不可达时，Anchor 保持 HTTP。CentOS Stream 10 的当前
-EPEL Certbot 版本不作支持承诺。
+EPEL Certbot 版本不作支持承诺；Debian 13 默认 Certbot 4.0 明确不满足 IP 证书
+能力要求，但仍支持域名 HTTPS。
 
-### Q: 如何修改 MySQL root 密码？
+### Q: 如何修改数据库 root 认证？
 
-密码在安装时随机生成并存储在 `password/mysql.pass`。修改密码后同步更新文件：
+Ubuntu 与 CentOS Stream 的 MySQL root 密码在安装时随机生成并存储在
+`password/mysql.pass`。修改密码后同步更新文件：
 
 ```bash
 mysql -u root -p -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '新密码';"
@@ -478,6 +490,11 @@ sudo chmod 600 password/mysql.pass
 ```
 
 上面的 `sed` 只更新 `root:` 行，会保留同一文件中的 `cdsi:` 应用凭据。若密码包含会被 `sed` 解释的字符，请手动编辑该行并再次确认文件权限为 600。
+
+Debian 13 的 MariaDB root 认证由系统默认的 `unix_socket` 提供，使用
+`sudo mariadb` 管理；Anchor 不生成 root 密码，`password/mysql.pass` 中的空
+`root:` 行用于标记该认证状态。不要执行上面的改密命令，否则会破坏安装器和
+卸载器依赖的 socket 认证契约。应用程序始终使用文件中的 `cdsi:` 密码连接。
 
 ---
 
@@ -506,7 +523,7 @@ Anchor/
 │   ├── check-env.sh              # 当前安装器使用的环境预检
 │   ├── common/                   # 默认组件的共享实现
 │   ├── ubuntu/                   # 已实现的平台路由
-│   ├── debian/                   # 规划边界，尚未实现
+│   ├── debian/                   # 已实现的 Debian 13 平台路由
 │   ├── centos-stream/            # 已实现的平台路由
 │   ├── configure.sh              # 可独立运行，尚未接入主安装流程
 │   └── health.sh                 # 未来 doctor 的占位实现

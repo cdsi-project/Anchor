@@ -64,7 +64,7 @@ source "${CDSI_ROOT}/lib/wordpress-access.sh"
 source "${CDSI_ROOT}/lib/domain.sh"
 cdsi_platform_init
 cdsi_platform_supported \
-    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS and CentOS Stream 10."
+    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
 
 # ── Root Check ─────────────────────────────────────────────
 if [[ "${EUID}" -eq 0 ]]; then
@@ -335,7 +335,7 @@ install_ip_tls_nginx() {
 _update_server_name() {
     local desired_names="${CDSI_DOMAIN:-${PRIMARY_DOMAIN:-}}"
     local primary="${PRIMARY_DOMAIN:-${desired_names%%,*}}"
-    local escaped_names="" file="" temporary="" backup="" candidate=""
+    local file="" temporary="" backup="" candidate=""
     local updated=false
     local -a candidates=()
 
@@ -344,7 +344,6 @@ _update_server_name() {
         || fail "No domain is available for the Nginx server_name."
     [[ -d "${CDSI_NGINX_SITE_DIR}" ]] \
         || fail "Nginx site directory not found: ${CDSI_NGINX_SITE_DIR}."
-    escaped_names="$(printf '%s' "$desired_names" | sed 's/[&/]/\\&/g')"
     candidates=(
         "${CDSI_NGINX_SITE_DIR}/${primary}.conf"
         "${CDSI_NGINX_SITE_DIR}/wordpress.conf"
@@ -363,27 +362,111 @@ _update_server_name() {
     [[ -n "$file" ]] \
         || fail "Anchor-managed WordPress Nginx configuration was not found. Run install-wordpress.sh first."
 
-    if grep -Fq 'server_name _;' "$file"; then
+    if awk -v expected_names="$desired_names" '
+        BEGIN {
+            expected_count = split(expected_names, expected, /[[:space:]]+/)
+        }
+        {
+            line = $0
+            sub(/[[:space:]]*#.*/, "", line)
+            gsub(/[{}]/, ";", line)
+            buffer = buffer " " line
+            while ((separator = index(buffer, ";")) > 0) {
+                directive = substr(buffer, 1, separator - 1)
+                buffer = substr(buffer, separator + 1)
+                sub(/^[[:space:]]+/, "", directive)
+                sub(/[[:space:]]+$/, "", directive)
+                field_count = split(directive, fields, /[[:space:]]+/)
+                if (fields[1] != "server_name") {
+                    continue
+                }
+                directive_count++
+                for (field_index = 2; field_index <= field_count; field_index++) {
+                    matched = 0
+                    for (expected_index = 1; expected_index <= expected_count; expected_index++) {
+                        if (fields[field_index] == expected[expected_index]) {
+                            matched = 1
+                            seen[directive_count, expected_index] = 1
+                        }
+                    }
+                    if (!matched) {
+                        extra_name = 1
+                    }
+                }
+            }
+        }
+        END {
+            mismatch = (directive_count == 0 || extra_name)
+            for (directive_index = 1; directive_index <= directive_count; directive_index++) {
+                for (expected_index = 1; expected_index <= expected_count; expected_index++) {
+                    if (expected[expected_index] != "" \
+                        && !seen[directive_index, expected_index]) {
+                        mismatch = 1
+                    }
+                }
+            }
+            exit(mismatch ? 1 : 0)
+        }
+    ' "$file"; then
+        :
+    else
         temporary="$(mktemp)" || fail "Could not stage the Nginx domain update."
         backup="$(mktemp)" || { rm -f -- "$temporary"; fail "Could not back up the Nginx site."; }
-        sed "s/server_name _;/server_name ${escaped_names};/" "$file" > "$temporary" \
-            && cp -a -- "$file" "$backup" \
-            && ${SUDO} cp -- "$temporary" "$file" \
-            || { rm -f -- "$temporary" "$backup"; fail "Could not update the Anchor Nginx domain."; }
+        awk -v desired_names="$desired_names" '
+            {
+                original = $0
+                code = $0
+                sub(/[[:space:]]*#.*/, "", code)
+                if (skipping_server_name) {
+                    if (code ~ /;/) {
+                        skipping_server_name = 0
+                    }
+                    next
+                }
+                if (code ~ /^[[:space:]]*server_name([[:space:]]|$)/) {
+                    indentation = original
+                    sub(/[^[:space:]].*$/, "", indentation)
+                    suffix = ""
+                    separator = index(original, ";")
+                    if (separator > 0) {
+                        suffix = substr(original, separator + 1)
+                    } else {
+                        skipping_server_name = 1
+                    }
+                    print indentation "server_name " desired_names ";" suffix
+                    replaced = 1
+                    next
+                }
+                print original
+            }
+            END { exit(replaced ? 0 : 2) }
+        ' "$file" > "$temporary" \
+            || { rm -f -- "$temporary" "$backup"; fail "Could not safely rewrite the Anchor Nginx server_name directives."; }
+        cp -a -- "$file" "$backup" \
+            || { rm -f -- "$temporary" "$backup"; fail "Could not back up the Anchor Nginx site."; }
+        if ! ${SUDO} cp -- "$temporary" "$file"; then
+            rm -f -- "$temporary"
+            if ${SUDO} cp -- "$backup" "$file" 2>/dev/null; then
+                rm -f -- "$backup"
+                fail "Could not update the Anchor Nginx domain; the previous site was restored."
+            fi
+            fail "Could not update the Anchor Nginx domain; recovery backup retained at ${backup}."
+        fi
         updated=true
-    elif ! grep -E "server_name[[:space:]][^;]*(^|[[:space:]])${primary//./\\.}([[:space:]]|;)" \
-        "$file" >/dev/null 2>&1; then
-        fail "Anchor Nginx site ${file} does not match ${primary}; it was not changed."
     fi
 
     if ! ${SUDO} nginx -t || ! cdsi_service_reload "$CDSI_NGINX_SERVICE"; then
         if [[ "$updated" == true ]]; then
-            ${SUDO} cp -- "$backup" "$file" 2>/dev/null || true
-            ${SUDO} nginx -t >/dev/null 2>&1 \
-                && cdsi_service_reload "$CDSI_NGINX_SERVICE" >/dev/null 2>&1 || true
+            rm -f -- "$temporary"
+            if ! ${SUDO} cp -- "$backup" "$file" 2>/dev/null \
+               || ! ${SUDO} nginx -t >/dev/null 2>&1 \
+               || ! cdsi_service_reload "$CDSI_NGINX_SERVICE" >/dev/null 2>&1; then
+                fail "Nginx rejected the domain update and rollback was incomplete; recovery backup retained at ${backup}."
+            fi
+            rm -f -- "$backup"
+            fail "Nginx rejected the domain update; the previous Anchor site was restored."
         fi
-        rm -f -- "$temporary" "$backup"
-        fail "Nginx rejected the domain update; the previous Anchor site was restored."
+        fail "Nginx rejected the existing Anchor site; no server_name change was made."
     fi
     rm -f -- "$temporary" "$backup"
     log_ok "Nginx server_name is ready for ${desired_names}."

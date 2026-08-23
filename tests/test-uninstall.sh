@@ -160,6 +160,24 @@ set_centos_fixture() {
     CDSI_MYSQL_FLAVOR="$CDSI_DB_FLAVOR"
 }
 
+set_debian_fixture() {
+    CDSI_PLATFORM_INITIALIZED=1
+    CDSI_PLATFORM="debian"
+    CDSI_OS_VERSION="13"
+    CDSI_OS_PRETTY="Debian GNU/Linux 13"
+    CDSI_PACKAGE_BACKEND="apt"
+    CDSI_SERVICE_BACKEND="systemd"
+    CDSI_NGINX_SERVICE="nginx"
+    CDSI_NGINX_SITE_DIR="/etc/nginx/sites-available"
+    CDSI_NGINX_ENABLED_DIR="/etc/nginx/sites-enabled"
+    CDSI_DB_PACKAGE="default-mysql-server"
+    CDSI_DB_SERVICE="mariadb"
+    CDSI_DB_FLAVOR="mariadb"
+    CDSI_MYSQL_PACKAGE="$CDSI_DB_PACKAGE"
+    CDSI_MYSQL_SERVICE="$CDSI_DB_SERVICE"
+    CDSI_MYSQL_FLAVOR="$CDSI_DB_FLAVOR"
+}
+
 set_centos_fixture
 SUDO=()
 
@@ -228,11 +246,31 @@ if [[ "$centos_mysql_summary" != *"/etc/my.cnf.d/zz-cdsi-anchor.cnf"* ]]; then
 fi
 
 # Redis and Supervisor are intentionally Ubuntu-only compatibility scripts;
-# CentOS uninstall must not stop services, remove packages, or delete paths.
+# Debian/CentOS uninstall must not stop services, remove packages, or delete paths.
+set_debian_fixture
+: > "$centos_action_log"
+uninstall_mysql >/dev/null
+assert_centos_action "drop-database"
+assert_centos_action "stop-disable:mariadb"
+assert_centos_action "purge-glob:default-mysql-server*"
+assert_centos_action "purge-glob:mariadb-server*"
+assert_centos_action "purge-glob:mariadb-client*"
+assert_centos_action "purge-glob:mariadb-common"
+assert_centos_action "remove-path:/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"
+assert_centos_action "remove-path:/var/lib/mysql"
+assert_no_centos_action "remove-path:/etc/mysql"
+assert_no_centos_action "purge-glob:mysql8.4*"
+debian_mysql_summary="$(comp_what mysql)"
+if [[ "$debian_mysql_summary" != *"/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"* ]]; then
+    printf 'FAIL: Debian MariaDB confirmation omits the Anchor-owned config file\n' >&2
+    exit 1
+fi
+
 : > "$centos_action_log"
 uninstall_redis >/dev/null 2>&1
 uninstall_supervisor >/dev/null 2>&1
 assert_no_destructive_action
+set_centos_fixture
 
 # Rebind only the hard-coded marker paths to disposable fixtures. The function
 # bodies under test remain the uninstaller's implementations.
@@ -407,4 +445,4 @@ for marker in "$firewall_marker" "$selinux_fcontext_marker" \
         || { printf 'FAIL: successful rollback retained marker: %s\n' "$marker" >&2; exit 1; }
 done
 
-printf 'PASS: Ubuntu/CentOS uninstall guards, scoped config cleanup, dry-run, and marker rollback\n'
+printf 'PASS: Ubuntu/Debian/CentOS uninstall guards, scoped config cleanup, dry-run, and marker rollback\n'

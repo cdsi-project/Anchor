@@ -106,6 +106,9 @@ assert_success "empty Ubuntu PHP service lookup should remain a safe probe" \
 assert_success "empty Ubuntu PHP upstream lookup should remain a safe probe" \
     cdsi_php_fpm_upstream
 assert_success "Ubuntu 24.04 should be supported" cdsi_platform_supported
+assert_success "Ubuntu should be recognized as an APT-family platform" \
+    cdsi_is_apt_family
+assert_failure "Ubuntu should not match the Debian helper" cdsi_is_debian
 
 init_ubuntu_fixture "26.04"
 assert_success "Ubuntu 26.04 should be supported" cdsi_platform_supported
@@ -126,9 +129,55 @@ mock_os_name="Debian GNU/Linux"
 mock_os_pretty="Debian GNU/Linux 13"
 reset_platform
 cdsi_platform_init
-assert_equal "debian" "$CDSI_PLATFORM" "unsupported Linux platform detection"
-assert_failure "unsupported Linux distributions should be rejected" \
+assert_equal "debian" "$CDSI_PLATFORM" "Debian platform detection"
+assert_equal "apt" "$CDSI_PACKAGE_BACKEND" "Debian package backend"
+assert_equal "systemd" "$CDSI_SERVICE_BACKEND" "Debian service backend"
+assert_equal "www-data" "$CDSI_WEB_USER" "Debian web user"
+assert_equal "www-data" "$CDSI_WEB_GROUP" "Debian web group"
+assert_equal "/etc/nginx/sites-available" "$CDSI_NGINX_SITE_DIR" \
+    "Debian Nginx site path"
+assert_equal "/etc/nginx/sites-enabled" "$CDSI_NGINX_ENABLED_DIR" \
+    "Debian Nginx enabled path"
+assert_equal "default-mysql-server" "$CDSI_DB_PACKAGE" \
+    "Debian database package"
+assert_equal "mariadb" "$CDSI_DB_SERVICE" "Debian database service"
+assert_equal "mariadb" "$CDSI_DB_FLAVOR" "Debian database flavor"
+assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
+    "Debian database package compatibility alias"
+assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
+    "Debian database service compatibility alias"
+assert_equal "$CDSI_DB_FLAVOR" "$CDSI_MYSQL_FLAVOR" \
+    "Debian database flavor compatibility alias"
+assert_equal "php8.4-fpm" "$(cdsi_php_service_name 8.4)" \
+    "Debian PHP-FPM service"
+assert_equal "unix:/run/php/php8.4-fpm.sock" \
+    "$(cdsi_php_fpm_upstream 8.4)" "Debian PHP-FPM upstream"
+assert_success "Debian helper should match" cdsi_is_debian
+assert_success "Debian should be recognized as an APT-family platform" \
+    cdsi_is_apt_family
+assert_success "Debian 13 x86_64 should be supported" cdsi_platform_supported
+CDSI_PLATFORM_ROUTE="debian"
+assert_success "matching Debian route should be accepted" \
     cdsi_platform_supported
+CDSI_PLATFORM_ROUTE="ubuntu"
+assert_failure "a non-Debian route should be rejected on Debian" \
+    cdsi_platform_supported
+
+mock_arch="aarch64"
+reset_platform
+cdsi_platform_init
+assert_success "Debian 13 aarch64 should be supported" cdsi_platform_supported
+
+mock_arch="x86_64"
+mock_os_version="12"
+reset_platform
+cdsi_platform_init
+assert_failure "Debian 12 should be rejected" cdsi_platform_supported
+
+mock_os_version="14"
+reset_platform
+cdsi_platform_init
+assert_failure "Debian 14 should be rejected" cdsi_platform_supported
 
 init_ubuntu_fixture "24.04"
 CDSI_PLATFORM_ROUTE="debian"
@@ -173,6 +222,8 @@ assert_equal "/usr/bin/php" "$CDSI_PHP_BIN" "CentOS PHP binary"
 assert_equal "/usr/sbin/php-fpm" "$CDSI_PHP_FPM_BIN" \
     "CentOS PHP-FPM binary"
 assert_success "CentOS Stream helper should match" cdsi_is_centos_stream
+assert_failure "CentOS Stream should not match the APT-family helper" \
+    cdsi_is_apt_family
 assert_success "CentOS Stream 10 x86_64 should be supported" \
     cdsi_platform_supported
 CDSI_PLATFORM_ROUTE="centos-stream"

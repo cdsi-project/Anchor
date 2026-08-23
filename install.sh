@@ -62,7 +62,12 @@ readonly CDSI_PREFLIGHT_SCRIPT="${CDSI_ROOT}/scripts/check-env.sh"
 
 # ── Component Registry ─────────────────────────────────────
 # Parallel arrays: names, descriptions, script paths, done flags.
-CDSI_COMP_NAMES=("Nginx" "MySQL" "PHP-FPM" "Certbot" "WordPress")
+if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+    CDSI_DATABASE_COMPONENT_NAME="MariaDB"
+else
+    CDSI_DATABASE_COMPONENT_NAME="MySQL"
+fi
+CDSI_COMP_NAMES=("Nginx" "$CDSI_DATABASE_COMPONENT_NAME" "PHP-FPM" "Certbot" "WordPress")
 CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "SSL证书" "WordPress站点")
 CDSI_COMP_SCRIPTS=(
     "${CDSI_ROOT}/scripts/install-nginx.sh"
@@ -360,10 +365,14 @@ cdsi_post_install_report() {
     if [[ -f "$mysql_pass" ]]; then
         local rootpw
         rootpw="$(grep '^root:' "$mysql_pass" 2>/dev/null | cut -d: -f2- || true)"
-        printf "    %bMySQL 数据库 / Database%b\n" "${CLR_BOLD}" "${CLR_RESET}"
-        printf "        root 密码: %s\n" "${rootpw:-<见 password/mysql.pass>}"
+        printf "    %b%s 数据库 / Database%b\n" "${CLR_BOLD}" "$CDSI_DATABASE_COMPONENT_NAME" "${CLR_RESET}"
+        if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+            printf "        root 认证: unix_socket（使用 sudo mariadb）\n"
+        else
+            printf "        root 密码: %s\n" "${rootpw:-<见 password/mysql.pass>}"
+        fi
     else
-        printf "    %bMySQL 凭据文件未找到：%s%b\n" "${CLR_YELLOW}" "$mysql_pass" "${CLR_RESET}"
+        printf "    %b%s 凭据文件未找到：%s%b\n" "${CLR_YELLOW}" "$CDSI_DATABASE_COMPONENT_NAME" "$mysql_pass" "${CLR_RESET}"
     fi
 
     # ── 4. WordPress access details (keep this as the final result block) ──
@@ -584,7 +593,7 @@ main() {
     CDSI_CURRENT_STAGE="INIT"
     if ! cdsi_platform_supported; then
         log_error "Unsupported operating system: ${CDSI_OS_PRETTY}."
-        log_info "Anchor supports Ubuntu Server 24.04/26.04 LTS and CentOS Stream 10."
+        log_info "Anchor supports Ubuntu Server 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
         exit "$CDSI_COMPONENT_NOT_IMPLEMENTED"
     fi
     logger_init

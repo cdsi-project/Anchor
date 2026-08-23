@@ -19,6 +19,7 @@ cdsi_ensure_dns_tools() {
     fi
     case "${CDSI_PLATFORM:-}" in
         ubuntu) cdsi_packages_install dnsutils ;;
+        debian) cdsi_packages_install bind9-dnsutils ;;
         centos-stream) cdsi_packages_install bind-utils ;;
         *) return 1 ;;
     esac

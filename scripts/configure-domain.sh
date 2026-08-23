@@ -291,6 +291,17 @@ fi
 commit_domain_transition
 
 primary_domain="${requested_domain%%,*}"
+site_url=""
+if command -v wp >/dev/null 2>&1 && [[ -f "${WP_DIR}/wp-load.php" ]]; then
+    site_url="$(wp --path="$WP_DIR" option get home --allow-root 2>/dev/null || true)"
+fi
+[[ -n "$site_url" ]] || site_url="http://${primary_domain}"
+validated_site_url="$(cdsi_resolve_wordpress_url \
+    "$WP_DIR" "$requested_domain" "http://${primary_domain}")"
 log_ok "Domain active: ${requested_domain}"
-log "Site URL: http://${primary_domain}"
-log "Next step: sudo bash scripts/configure-https.sh"
+log "Site URL: ${site_url}"
+if [[ "$site_url" == https://* && "$validated_site_url" == https://* ]]; then
+    log_ok "HTTPS is already active for ${primary_domain}."
+else
+    log "Next step: sudo bash scripts/configure-https.sh"
+fi
