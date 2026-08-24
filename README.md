@@ -6,10 +6,6 @@
 
 **Creator Digital Sovereignty Infrastructure**<br>
 **创作者数字主权基础设施**<br>
-**个人数字主权，从一个脚本开始。**
-
-> **Your Domain. Your Content. Your Data. Your Audience.**  
-> **你的域名，你的内容，你的数据，你的用户关系。**
 
 ## 中文简介
 
@@ -29,15 +25,11 @@
 
 CDSI 的核心原则是：
 
-> **平台负责分发，创作者负责拥有。**
-
-以及：
-
-> **流量可以借，资产必须留下。**
+> **创作者负责拥有，平台只负责渠道分发**
 
 长期来看，CDSI 希望让每一个创作者都能够拥有自己的数字原点，而不是把全部数字存在建立在第三方平台之上。
 
-> **完整的安装步骤、菜单说明、域名/SSL 配置、常见问题排错，请阅读 [使用说明/INSTALL](INSTALL.md)。**
+> **完整安装步骤，请阅读 [使用说明/INSTALL](INSTALL.md)。**
 
 Anchor 的产品定位、当前边界和已知限制见 [CDSI-Anchor](CDSI-Anchor.md)。
 
@@ -288,27 +280,17 @@ Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13** 和
 
 1. **一台干净的受支持 Linux 服务器**
    - 支持 `x86_64` 和 `aarch64` 架构
-   - 最低 1 核 CPU、1 GB 内存和 10 GB 根分区可用空间；推荐 2 GB 内存和
-     20 GB 根分区可用空间
+   - 最低1核 CPU、2GB 内存和 10GB 根分区可用空间；推荐 4GB 内存和
+     20GB 根分区可用空间
    - 登录用户需要 root 或 sudo 权限
-   - 系统使用 systemd，以及 Ubuntu/Debian APT 或 CentOS DNF 默认软件源
-   - 使用远程引导时只需任一支持 HTTPS 的下载工具（`curl` 或 `wget`）；Git、
-     CA 证书和其他引导工具由脚本自动安装
 2. **稳定的公网入口和网络连接**
    - 准备公网 IP
-   - 防火墙开放 80 端口和实际使用的 SSH 管理端口；启用 HTTPS 时再确保
-     443 端口开放。
+   - 防火墙开放 80、443 端口
 3. **交互式 SSH 终端**
-   - `install.sh` 使用交互菜单，不能通过无 TTY 的后台任务或管道运行。
+   - Xshell
+   - GitBash
+   - PowerShell
 
-### 使用域名和 HTTPS 时必需
-
-4. **一个能够管理 DNS 的域名**
-   - 使用裸域名，例如 `cdsi.com`，不要包含 `https://`、端口或路径。
-   - 所有 DNS A 记录都必须指向服务器公网 IPv4；如果存在 AAAA 记录，也必须
-     指向当前服务器实际配置的公网 IPv6。
-   - 等待 DNS 生效，并确保公网能够访问 80 端口，供 Let's Encrypt HTTP-01
-     验证使用。
 
 没有域名也可以安装。Anchor 会先完成基础服务和 WordPress，再把域名与 HTTPS
 作为最后一个可选步骤；直接按 Enter 即可跳过。默认网站地址为
@@ -327,11 +309,7 @@ HTTPS，但不满足 IP 证书所需的 Certbot 5.4+ 能力。公网 IP 探测�
 ### 建议
 
 - 优先使用干净、专用的服务器，不要与已有生产网站、数据库或共享运行时混用。
-- Ubuntu/Debian 安装前移除 nginx.org、Ondrej/Sury PHP 等第三方冲突源；
-  Anchor 不会静默改写这些软件源。CentOS 基础栈使用 BaseOS/AppStream，
-  Certbot 需要的 `epel-release` 来自 CentOS Extras。
-- 如果服务器已有业务数据或配置，先创建云盘快照，并备份 Nginx、PHP、MySQL
-  或 MariaDB，以及 WordPress 数据。
+- 如果服务器已有业务数据或配置，也可单独安装Anchor组件。
 - 长时间安装可在 `tmux` 或 `screen` 会话中执行，避免 SSH 中断影响交互流程。
 
 ---
@@ -361,9 +339,7 @@ wget -qO anchor-bootstrap.sh \
 1. 检查操作系统、CPU 架构、systemd、root/sudo 权限和交互终端。
 2. 刷新当前系统默认 APT/DNF 仓库的元数据，不改写软件源、不执行全系统升级。
 3. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-4. 优先从 Gitee 克隆经过 annotated tag 固定的 `v0.3.4` 发布版，失败时尝试
-   GitHub，默认保存到 `/opt/cdsi-anchor`。
-5. 自动进入 `install.sh` 的交互菜单。
+4. 自动进入 `install.sh` 的交互菜单。
 
 脚本下载到本地后再执行，因此用户可以先检查内容；非 root 用户执行时会通过
 `sudo` 请求权限。远程可执行脚本只通过 HTTPS 分发，不提供 HTTP 入口。
