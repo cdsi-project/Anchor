@@ -31,8 +31,8 @@ sh -n "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh has invalid POSIX shell syntax"
 grep -Fqx '#!/bin/sh' "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh must run before Bash is installed"
-grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.3"' "$BOOTSTRAP_SCRIPT" \
-    || fail_test "bootstrap is not pinned to the v0.3.3 release tag"
+grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.4"' "$BOOTSTRAP_SCRIPT" \
+    || fail_test "bootstrap is not pinned to the v0.3.4 release tag"
 bootstrap_release="$(
     sed -n 's/^CDSI_BOOTSTRAP_REF="\([^"]*\)"$/\1/p' "$BOOTSTRAP_SCRIPT"
 )"

@@ -323,7 +323,7 @@ provision_php() {
 # ══════════════════════════════════════════════════════════
 # 2) Download WordPress package (zh_CN build) from the CDN and unzip
 # ══════════════════════════════════════════════════════════
-WP_PACKAGE_NAME="wordpress-7.0.4-zh_CN.zip"
+WP_PACKAGE_NAME="wordpress-7.1-zh_CN.zip"
 WP_PACKAGE_URLS=(
     "http://cdn.aicsi.cn/packages/${WP_PACKAGE_NAME}"
     "https://cn.wordpress.org/${WP_PACKAGE_NAME}"

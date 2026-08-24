@@ -6,7 +6,7 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 服务器基础设施安装工具，它把一台受支持的服务器配置为可访问的 OpenWeb(WordPress)
 节点。
 
-> 当前状态：M0 集成与加固，Installer v0.3.3。
+> 当前状态：M0 集成与加固，Installer v0.3.4。
 
 ## 当前实现
 
@@ -39,12 +39,12 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
 根目录 `bootstrap.sh` 会刷新系统默认源的元数据，安装 Git、Bash、curl、CA
-证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.3` 发布标签，
+证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.4` 发布标签，
 然后进入 `install.sh`。它不会改写软件源或执行全系统升级。
 
 已有 Git 时也可手动克隆：

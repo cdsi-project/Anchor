@@ -513,7 +513,7 @@ Beacon Application Password
 CDSI Node
 ```
 
-当前 Anchor Installer v0.3.3 已实现四项基础组件与可选最终 Certbot/HTTPS
+当前 Anchor Installer v0.3.4 已实现四项基础组件与可选最终 Certbot/HTTPS
 流程。域名步骤可以按 Enter 跳过；Redis 与 Supervisor 脚本仍可独立运行，但
 暂不属于默认安装；CDSI Core、`cdsi` CLI/doctor 和完整服务器恢复仍是后续工作。
 
@@ -1134,7 +1134,7 @@ Optional final step: domain and HTTPS
 CDSI Node
 ```
 
-Anchor Installer v0.3.3 implements the four-component base path plus optional
+Anchor Installer v0.3.4 implements the four-component base path plus optional
 final Certbot/HTTPS setup. The domain step can be skipped with Enter. Redis and
 Supervisor remain independently runnable scripts but are not part of the
 default installation. CDSI Core, the `cdsi` CLI/doctor, and complete server

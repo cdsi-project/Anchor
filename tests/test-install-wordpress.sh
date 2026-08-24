@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 TEST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORDPRESS_SCRIPT="${TEST_ROOT}/scripts/common/install-wordpress.sh"
+CHECKSUM_FILE="${TEST_ROOT}/SHA256SUMS"
 
 fail_test() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -31,6 +32,28 @@ extract_function() {
     || fail_test "WordPress implementation not found: ${WORDPRESS_SCRIPT}"
 bash -n "$WORDPRESS_SCRIPT" \
     || fail_test "WordPress implementation has invalid Bash syntax"
+
+expected_wp_package="wordpress-7.1-zh_CN.zip"
+expected_wp_sha256="6bd9237178dd870f7b47cf33e7129219d9bd2a85a92be641cf487c2cd61a2dba"
+actual_wp_package="$(sed -n 's/^WP_PACKAGE_NAME="\([^"]*\)"$/\1/p' "$WORDPRESS_SCRIPT")"
+assert_equal "$expected_wp_package" "$actual_wp_package" \
+    "WordPress package version"
+grep -Fq '"http://cdn.aicsi.cn/packages/${WP_PACKAGE_NAME}"' "$WORDPRESS_SCRIPT" \
+    || fail_test "WordPress CDN URL must use the configured package name"
+grep -Fq '"https://cn.wordpress.org/${WP_PACKAGE_NAME}"' "$WORDPRESS_SCRIPT" \
+    || fail_test "WordPress official fallback URL is missing"
+
+checksum_entry_count="$(awk -v package="$expected_wp_package" \
+    '$2 == package { count += 1 } END { print count + 0 }' "$CHECKSUM_FILE")"
+assert_equal "1" "$checksum_entry_count" \
+    "WordPress checksum entry count"
+actual_wp_sha256="$(awk -v package="$expected_wp_package" \
+    '$2 == package { print $1 }' "$CHECKSUM_FILE")"
+assert_equal "$expected_wp_sha256" "$actual_wp_sha256" \
+    "WordPress package SHA-256"
+if grep -Fq 'wordpress-7.0.4-zh_CN.zip' "$WORDPRESS_SCRIPT" "$CHECKSUM_FILE"; then
+    fail_test "obsolete WordPress 7.0.4 package reference remains"
+fi
 
 provision_php_function="$(extract_function provision_php)"
 configure_nginx_function="$(extract_function configure_nginx)"

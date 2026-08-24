@@ -38,7 +38,7 @@ GD，不安装 Imagick。
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -46,7 +46,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
@@ -55,7 +55,7 @@ wget -qO anchor-bootstrap.sh \
 1. 使用当前配置的系统默认源执行 APT metadata update 或 DNF
    `makecache --refresh`。
 2. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.3` Anchor
+3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.4` Anchor
    发布版到 `/opt/cdsi-anchor`。
 4. 启动 `install.sh` 交互菜单。
 
@@ -67,7 +67,7 @@ GitHub 引导地址：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.3/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.4/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
