@@ -140,7 +140,7 @@ Infrastructure complexity should be pushed below the user-facing layer wherever 
 
 The project is currently in:
 
-# M0 — Anchor Installer v0.3.2 Integration and Hardening
+# M0 — Anchor Installer v0.3.3 Integration and Hardening
 
 Current priority:
 
@@ -152,7 +152,8 @@ The current working baseline already includes:
 - a POSIX remote bootstrap that prepares an otherwise unconfigured server and
   hands control to `install.sh`
 - preflight, logging, and component orchestration in `install.sh`
-- Nginx, MySQL/MariaDB, PHP-FPM, Certbot, and WordPress installation
+- required Nginx, MySQL/MariaDB, PHP-FPM, and WordPress installation followed
+  by optional final domain/HTTPS and Certbot setup
 - Ubuntu/Debian APT and CentOS DNF package backends with bounded retry
 - system-default base stack packages and explicitly bounded EPEL use on CentOS
 - strict A/AAAA domain activation with separate active and pending state
@@ -184,7 +185,7 @@ Do not expand scope into these areas unless explicitly requested.
 
 # 4. Current M0 Architecture
 
-The implemented default deployment stack is:
+The implemented deployment stack and optional TLS path are:
 
 ```text
 OS           Ubuntu Server 24.04/26.04 LTS, Debian 13, or CentOS Stream 10
@@ -200,7 +201,8 @@ The following distinctions are mandatory when documenting or changing the
 repository:
 
 ```text
-Default flow     Nginx, MySQL/MariaDB, PHP-FPM, Certbot, WordPress
+Required base    Nginx, MySQL/MariaDB, PHP-FPM, WordPress
+Optional final   Domain activation, HTTPS, Certbot
 Standalone only  Redis, Supervisor
 Planned          Composer, CDSI Core deployment, cdsi CLI/doctor
 ```
@@ -344,6 +346,14 @@ wrappers invoke the shared implementations under `scripts/common/`. Shared
 primitives belong under `lib/`. Keep these layers small and
 responsibility-focused.
 
+The Install All path must establish the usable base site before asking for a
+domain: Nginx, database, PHP-FPM, then WordPress. Domain activation and HTTPS are
+one optional final step. Empty input or EOF skips that step without changing
+active or pending domain state. DNS, ACME, or public-IP certificate limitations
+must not turn a completed base installation into a failure; report the optional
+step as skipped, deferred, or failed, then print the final site and credentials.
+Signal-derived exits must still interrupt the installer.
+
 ---
 
 # 7. Script Convention
@@ -362,7 +372,8 @@ on their exit codes:
 
 ```text
 0        component completed or was safely skipped
-non-zero component failed; orchestration must report and stop as appropriate
+10       optional configuration was safely deferred
+other    component failed; orchestration must report and stop as appropriate
 ```
 
 Scripts may source shared functions from `lib/`, but must load the runtime they
@@ -838,9 +849,13 @@ Infrastructure configuration
         ↓
 WordPress OpenWeb node
         ↓
-Domain
-        ↓
-HTTPS
+Optional final domain/HTTPS prompt
+  Enter/EOF        domain or ip
+      ↓                 ↓
+ keep current      configure/attempt
+      └────────┬────────┘
+               ↓
+Final access and credentials report
         ↓
 Healthy CDSI Node
 ```
@@ -854,14 +869,18 @@ Important scenarios:
 4. Existing Nginx.
 5. DNS not yet configured.
 6. Requested domain has a wrong A or AAAA record and remains pending.
-7. Domain is configured or cleared independently without reinstalling services.
-8. Public IP HTTPS on capable and incapable Certbot versions.
-9. Primary ACME directory is unreachable with and without an explicit fallback.
-10. Partial installation failure.
-11. Service unavailable or disabled at boot.
-12. Incorrect configuration.
-13. Uninstall dry-run and confirmed uninstall.
-14. Future health/doctor behavior when implemented.
+7. Empty input and EOF skip final domain/HTTPS configuration without changing
+   active or pending domain state.
+8. Deferred or failed optional HTTPS still produces the base-install access and
+   credential report.
+9. Domain is configured or cleared independently without reinstalling services.
+10. Public IP HTTPS on capable and incapable Certbot versions.
+11. Primary ACME directory is unreachable with and without an explicit fallback.
+12. Partial installation failure.
+13. Service unavailable or disabled at boot.
+14. Incorrect configuration.
+15. Uninstall dry-run and confirmed uninstall.
+16. Future health/doctor behavior when implemented.
 
 ---
 
@@ -870,16 +889,16 @@ Important scenarios:
 ## M0 Integration and Hardening
 
 The installer skeleton milestone is complete. The current implementation must
-be treated as an existing five-component product path, not as a plan to start
-over.
+be treated as an existing four-component base path with an optional final
+Certbot/domain/HTTPS step, not as a plan to start over.
 
 Implemented:
 
 ```text
 POSIX new-server bootstrap with Gitee/GitHub retrieval
 Preflight and logging
-Nginx / MySQL or MariaDB / PHP-FPM / Certbot / WordPress
-Domain-aware HTTP/HTTPS setup
+Nginx / MySQL or MariaDB / PHP-FPM / WordPress required base installation
+Optional final Certbot and domain-aware HTTP/HTTPS setup
 Strict A/AAAA activation with active/pending domain state
 Independent domain clear/activate and domain/IP HTTPS commands
 Directory-only ACME fallback and capability-gated short-lived IP certificates

@@ -221,14 +221,14 @@ A creator should eventually be able to migrate away from CDSI without losing the
 ## Current Status
 
 CDSI Anchor is currently in **M0 integration and hardening**. The installer
-version is **0.3.2**.
+version is **0.3.3**.
 
 The primary path now provisions a WordPress OpenWeb node on supported Ubuntu
 Server, Debian, and CentOS Stream releases:
 
 | Status | Scope |
 | --- | --- |
-| Implemented in `install.sh` | Preflight, Nginx, MySQL/MariaDB, PHP-FPM, Certbot, WordPress, domain/HTTPS configuration, final service/access report, and component uninstall |
+| Implemented in `install.sh` | Preflight, the required Nginx/MySQL-or-MariaDB/PHP-FPM/WordPress stack, optional final domain/HTTPS and Certbot setup, final service/access report, and component uninstall |
 | Implemented support | Ubuntu/Debian APT and CentOS DNF/systemd routes, bounded package retries, strict domain DNS activation, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
 | Standalone only | Redis and Supervisor scripts remain available, but are hidden from the main menu and Install All flow |
 | Planned | Composer/CDSI Core deployment, the `cdsi` CLI, `cdsi doctor`, resume/update workflows, and complete server backup/restore |
@@ -301,7 +301,7 @@ Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13** 和
 3. **交互式 SSH 终端**
    - `install.sh` 使用交互菜单，不能通过无 TTY 的后台任务或管道运行。
 
-### 使用域名和 CDSI Beacon 时必需
+### 使用域名和 HTTPS 时必需
 
 4. **一个能够管理 DNS 的域名**
    - 使用裸域名，例如 `cdsi.com`，不要包含 `https://`、端口或路径。
@@ -310,10 +310,12 @@ Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13** 和
    - 等待 DNS 生效，并确保公网能够访问 80 端口，供 Let's Encrypt HTTP-01
      验证使用。
 
-没有域名也可以安装。默认网站地址为 `http://<服务器公网 IP>`，WordPress 和
-Beacon Application Password 仍会创建。输入的域名只有在 A/AAAA 解析严格匹配
-本机后才会生效；未就绪的域名保存在 `config/domain.pending`，不会改动当前
-WordPress URL 或 Nginx 站点。
+没有域名也可以安装。Anchor 会先完成基础服务和 WordPress，再把域名与 HTTPS
+作为最后一个可选步骤；直接按 Enter 即可跳过。默认网站地址为
+`http://<服务器公网 IP>`，WordPress 和 Beacon Application Password 仍会创建。
+输入的域名只有在 A/AAAA 解析严格匹配本机后才会生效；未就绪的域名保存在
+`config/domain.pending`，不会改动当前 WordPress URL 或 Nginx 站点，也不会让
+已经完成的基础安装失败。
 
 公网 IP 也可以显式申请公信 HTTPS，但必须是公网 IPv4，且系统提供的 Certbot
 必须为 5.4 或更高版本并支持 Let's Encrypt `shortlived` profile。能力不足时
@@ -342,7 +344,7 @@ HTTPS，但不满足 IP 证书所需的 Certbot 5.4+ 能力。公网 IP 探测�
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -350,7 +352,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
@@ -359,7 +361,7 @@ wget -qO anchor-bootstrap.sh \
 1. 检查操作系统、CPU 架构、systemd、root/sudo 权限和交互终端。
 2. 刷新当前系统默认 APT/DNF 仓库的元数据，不改写软件源、不执行全系统升级。
 3. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-4. 优先从 Gitee 克隆经过 annotated tag 固定的 `v0.3.2` 发布版，失败时尝试
+4. 优先从 Gitee 克隆经过 annotated tag 固定的 `v0.3.3` 发布版，失败时尝试
    GitHub，默认保存到 `/opt/cdsi-anchor`。
 5. 自动进入 `install.sh` 的交互菜单。
 
@@ -370,7 +372,7 @@ GitHub 下载入口：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.2/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.3/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -409,6 +411,13 @@ The goal is to reduce infrastructure complexity so that owning an independent di
 ```bash
 sudo ./install.sh
 ```
+
+选择“安装全部”时，Anchor 先安装 Nginx、MySQL/MariaDB、PHP-FPM 和
+WordPress，确保 IP HTTP 站点可用；随后才询问域名。直接按 Enter（或输入流
+结束）会跳过域名与 HTTPS，保留已有 active/pending 状态并继续输出网站地址、
+WordPress 凭据和 Beacon Application Password。输入域名会调用统一的
+`configure-https.sh DOMAIN` 流程；DNS 或证书签发暂时失败只会把可选步骤标记为
+deferred，不会推翻已经完成的基础安装。输入 `ip` 可显式尝试公网 IP HTTPS。
 
 Each script under `scripts/` can also be run independently for focused operation or diagnosis:
 
@@ -515,9 +524,10 @@ accordingly.
 
 ### M0 — Node Anchor
 
-**In progress.** The five-component WordPress OpenWeb installation path is
-implemented. Current work is integration testing, failure recovery, upgrade and
-uninstall safety, and real health checks.
+**In progress.** The four-component WordPress OpenWeb base installation and
+optional final Certbot/domain/HTTPS path are implemented. Current work is
+integration testing, failure recovery, upgrade and uninstall safety, and real
+health checks.
 
 Goal:
 
@@ -674,6 +684,6 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 ## Status
 
-**M0 integration and hardening / Anchor Installer v0.3.2**
+**M0 integration and hardening / Anchor Installer v0.3.3**
 
 CDSI is under active development and is not yet ready for production use.

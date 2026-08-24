@@ -27,8 +27,9 @@ infrastructure path:
 - basic deployment workflow is functional
 - CDSI Anchor can provision a usable server environment
 
-Anchor now provisions the five-component WordPress OpenWeb path, but M0 still
-requires integration, recovery, upgrade, uninstall, and health-check hardening.
+Anchor now provisions the four-component WordPress OpenWeb base path plus an
+optional final Certbot/domain/HTTPS step, but M0 still requires integration,
+recovery, upgrade, uninstall, and health-check hardening.
 The broader assumption in this draft must therefore be treated as a future
 activation gate, not as a completion claim.
 

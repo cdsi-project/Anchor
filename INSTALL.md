@@ -38,7 +38,7 @@ GD，不安装 Imagick。
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -46,7 +46,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
@@ -55,7 +55,7 @@ wget -qO anchor-bootstrap.sh \
 1. 使用当前配置的系统默认源执行 APT metadata update 或 DNF
    `makecache --refresh`。
 2. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.2` Anchor
+3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.3` Anchor
    发布版到 `/opt/cdsi-anchor`。
 4. 启动 `install.sh` 交互菜单。
 
@@ -67,7 +67,7 @@ GitHub 引导地址：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.2/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.3/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -119,18 +119,39 @@ Preflight 通过后，按任意键进入主菜单：
 
 ### 3.2 组件安装菜单
 
-选择「1 安装服务」后，如果尚未配置域名，会先提示输入域名：
+选择「1 安装服务」后会直接进入组件菜单，不会先要求填写域名：
 
 ```
-域名 (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): _
+  0. 安装全部组件
+  1. Nginx        (HTTP服务)
+  2. MySQL        (数据库)
+  3. PHP-FPM      (PHP程序)
+  4. WordPress    (WordPress站点)
+  5. Certbot      (SSL证书)
 ```
 
-- 输入域名（如 `cdsi.example.com`）后，Anchor 会先严格校验 DNS。所有 A 记录
-  必须是本服务器公网 IPv4；如果存在 AAAA 记录，每一条也必须属于本服务器。
-- 校验成功才写入 `config/domain` 并作为活动域名。解析缺失、指向其他地址或
-  无法可靠查询时，候选值写入 `config/domain.pending`，当前 WordPress URL 和
-  Nginx 站点不变；首次安装则继续使用服务器 IP。
-- 直接回车跳过域名，网站默认通过 `http://<服务器 IP>` 访问。
+- **选 0**：先按 Nginx → MySQL/MariaDB → PHP-FPM → WordPress 安装必需
+  组件，建立可通过 IP HTTP 访问的站点；完成后才进入下面的可选域名/HTTPS
+  步骤，最后输出验收报告并退出。
+- **选 1-5**：单独运行某个组件。脚本会检查并复用现有状态，必要时继续协调配置，而不是一律整项跳过。
+
+“安装全部”的最后一步会提示：
+
+```text
+域名 (Enter 跳过；输入 ip 可尝试公网 IP HTTPS): _
+```
+
+- 直接按 Enter 或输入流结束：跳过域名与 HTTPS，不修改已有的
+  `config/domain` 或 `config/domain.pending`；新站继续使用
+  `http://<服务器 IP>`。
+- 输入域名（如 `cdsi.example.com`）：Anchor 先严格校验 DNS，再激活域名并
+  申请 HTTPS。所有 A 记录必须是本服务器公网 IPv4；如果存在 AAAA 记录，每一
+  条也必须属于本服务器。
+- DNS 未生效或证书能力不足：把可选步骤标记为 `deferred` 并保留当前站点；
+  其他配置错误标记为 `failed`，不推翻基础组件的安装结果。两者都会继续显示
+  网站地址、服务/访问检查和全部凭据；`failed` 时应先核对最终检查与日志，再从
+  主菜单的“配置域名”“配置 HTTPS”重试。
+- 输入 `ip`：显式尝试公网 IP HTTPS；不支持时同样保留 HTTP 站点。
 
 IP 模式会优先复用已有 WordPress 公网 URL，否则通过多个 HTTPS 端点探测并
 校验公网 IPv4。若服务器网络阻止这些端点，显式指定公网 IP：
@@ -144,20 +165,6 @@ sudo CDSI_SERVER_IP=YOUR_PUBLIC_IPV4 ./install.sh
 `CDSI_ALLOW_PRIVATE_IP=true`。自动模式不会把 `10/8`、`172.16/12`、
 `192.168/16` 等私网地址写入 WordPress。
 
-然后进入组件菜单：
-
-```
-  0. 安装全部组件
-  1. Nginx        (HTTP服务)
-  2. MySQL        (数据库)
-  3. PHP-FPM      (PHP程序)
-  4. Certbot      (SSL证书)
-  5. WordPress    (WordPress站点)
-```
-
-- **选 0**：按实际依赖顺序安装全部 5 个可见组件，完成后自动输出验收报告并退出。内部会先创建 WordPress/Nginx 站点块，再执行最终 Certbot 步骤；证书失败时保留 HTTP 站点并在摘要中标记。
-- **选 1-5**：单独运行某个组件。脚本会检查并复用现有状态，必要时继续协调配置，而不是一律整项跳过。
-
 ### 3.3 五个可见组件说明
 
 | # | 组件 | 作用 | 重跑行为 |
@@ -165,13 +172,12 @@ sudo CDSI_SERVER_IP=YOUR_PUBLIC_IPV4 ./install.sh
 | 1 | Nginx | Web 服务器，反向代理 PHP-FPM | 复用已运行且配置有效的 Nginx，并重新协调全局 tuning |
 | 2 | MySQL | 数据库，存储 WordPress 数据 | 仅在 root/cdsi 凭据完整且 root 认证成功时快速复用；否则继续修复配置 |
 | 3 | PHP-FPM | PHP 运行时，执行 WordPress | PHP-FPM 运行且全部必需扩展已加载时快速复用；全新安装会补齐所需扩展 |
-| 4 | Certbot | Let's Encrypt SSL 证书签发与续期 | 无活动域名时只安装并保持 HTTP；已有证书时验证后复用 |
-| 5 | WordPress | 站点应用，配置 Nginx + 安装 WP | 已安装 core 仍会协调 URL、权限、Nginx 和 Beacon Application Password |
+| 4 | WordPress | 站点应用，配置 Nginx + 安装 WP | 已安装 core 仍会协调 URL、权限、Nginx 和 Beacon Application Password |
+| 5 | Certbot | Let's Encrypt SSL 证书签发与续期 | “安装全部”中仅在最后按需执行；已有证书时验证后复用 |
 
-**推荐方式**：选 0，由安装器内部按 Nginx → MySQL → PHP-FPM → WordPress →
-Certbot 执行。没有域名或 DNS 尚未生效时，Certbot 安全延期，站点继续使用
-HTTP；解析修复后可从主菜单选择“配置域名”和“配置 HTTPS”，或运行第 4 节的
-独立命令。
+**推荐方式**：选 0，先完成 Nginx → MySQL/MariaDB → PHP-FPM → WordPress，
+再按需配置域名和 Certbot。暂时没有域名时直接按 Enter；解析修复后可从主菜单
+选择“配置域名”和“配置 HTTPS”，或运行第 4 节的独立命令。
 
 ---
 
@@ -366,7 +372,7 @@ sudo bash scripts/install-supervisor.sh
 验证仍可能继续执行。日常域名或证书变更优先使用 `configure-domain.sh` 和
 `configure-https.sh`，不需要重装 WordPress 或其他基础服务。
 
-默认组件的公开脚本会先检测操作系统，再进入平台目录。Ubuntu 24.04/26.04、
+跨平台组件的公开脚本会先检测操作系统，再进入平台目录。Ubuntu 24.04/26.04、
 Debian 13 与 CentOS Stream 10 路由均已实现。Redis 与 Supervisor 兼容脚本仍
 仅支持 Ubuntu。
 
@@ -436,7 +442,7 @@ sudo ./uninstall.sh --yes all
 vim config/nginx-site.conf.template
 
 # 重新应用
-sudo ./install.sh   # 选 1 → 选 5（WordPress）
+sudo ./install.sh   # 选 1 → 选 4（WordPress）
 ```
 
 全局 Nginx 调优（gzip 类型、SSL session cache、server_tokens 等）由 `install-nginx.sh` 自动写入 `/etc/nginx/conf.d/cdsi-tuning.conf`。
@@ -574,7 +580,7 @@ Anchor/
 │   ├── install-certbot.sh
 │   ├── install-wordpress.sh
 │   ├── check-env.sh              # 当前安装器使用的环境预检
-│   ├── common/                   # 默认组件的共享实现
+│   ├── common/                   # 跨平台组件的共享实现
 │   ├── ubuntu/                   # 已实现的平台路由
 │   ├── debian/                   # 已实现的 Debian 13 平台路由
 │   ├── centos-stream/            # 已实现的平台路由

@@ -163,8 +163,9 @@ for nginx_template in "${TEST_ROOT}/config/nginx-site.conf.template"; do
     fi
 done
 
-if ! grep -q 'rm -f "$CDSI_DOMAIN_FILE"' "${TEST_ROOT}/install.sh"; then
-    printf 'FAIL: IP mode does not clear an invalid persisted domain\n' >&2
+if ! grep -q 'cdsi_configure_optional_domain_https' "${TEST_ROOT}/install.sh" \
+   || ! grep -q 'scripts/configure-https.sh' "${TEST_ROOT}/install.sh"; then
+    printf 'FAIL: install-all lacks the optional final domain/HTTPS step\n' >&2
     exit 1
 fi
 

@@ -67,20 +67,25 @@ if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
 else
     CDSI_DATABASE_COMPONENT_NAME="MySQL"
 fi
-CDSI_COMP_NAMES=("Nginx" "$CDSI_DATABASE_COMPONENT_NAME" "PHP-FPM" "Certbot" "WordPress")
-CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "SSL证书" "WordPress站点")
+readonly CDSI_WORDPRESS_COMPONENT_INDEX=3
+readonly CDSI_CERTBOT_COMPONENT_INDEX=4
+CDSI_COMP_NAMES=("Nginx" "$CDSI_DATABASE_COMPONENT_NAME" "PHP-FPM" "WordPress" "Certbot")
+CDSI_COMP_DESCS=("HTTP服务" "数据库" "PHP程序" "WordPress站点" "SSL证书")
 CDSI_COMP_SCRIPTS=(
     "${CDSI_ROOT}/scripts/install-nginx.sh"
     "${CDSI_ROOT}/scripts/install-mysql.sh"
     "${CDSI_ROOT}/scripts/install-php.sh"
-    "${CDSI_ROOT}/scripts/install-certbot.sh"
     "${CDSI_ROOT}/scripts/install-wordpress.sh"
+    "${CDSI_ROOT}/scripts/install-certbot.sh"
 )
 CDSI_COMP_DONE=()
 CDSI_COMP_UNAVAILABLE=()
+CDSI_COMP_OPTIONAL_STATUS=()
+CDSI_BASE_DOMAIN_FILE=""
 for _i in "${!CDSI_COMP_NAMES[@]}"; do
     CDSI_COMP_DONE[$_i]=false
     CDSI_COMP_UNAVAILABLE[$_i]=false
+    CDSI_COMP_OPTIONAL_STATUS[$_i]=""
 done
 unset _i
 
@@ -135,6 +140,10 @@ cdsi_show_menu() {
             printf "  %b%d%b  %-10s - %-12s %b[planned]%b\n" \
                 "${CLR_DIM}" "$num" "${CLR_RESET}" "$name" "$desc" \
                 "${CLR_YELLOW}" "${CLR_RESET}"
+        elif [[ -n "${CDSI_COMP_OPTIONAL_STATUS[$i]}" ]]; then
+            printf "  %b%d%b  %-10s - %-12s %b[%s]%b\n" \
+                "${CLR_DIM}" "$num" "${CLR_RESET}" "$name" "$desc" \
+                "${CLR_YELLOW}" "${CDSI_COMP_OPTIONAL_STATUS[$i]}" "${CLR_RESET}"
         else
             printf "  %b%d%b  %-10s - %s\n" \
                 "${CLR_BOLD}" "$num" "${CLR_RESET}" "$name" "$desc"
@@ -196,24 +205,130 @@ cdsi_install_component() {
     fi
 }
 
-# Install all remaining components in dependency order. The menu keeps Certbot
-# at option 4, but a clean server needs the WordPress Nginx site block first.
+# Install the required stack first. Domain activation and Certbot are an
+# optional final step so DNS or ACME problems cannot block a usable IP site.
 cdsi_install_all() {
     local i
-    local -a install_order=(0 1 2 4 3)
+    local -a install_order=(0 1 2 "$CDSI_WORDPRESS_COMPONENT_INDEX")
     for i in "${install_order[@]}"; do
         if [[ "${CDSI_COMP_DONE[$i]}" != true && "${CDSI_COMP_UNAVAILABLE[$i]}" != true ]]; then
-            if [[ "$i" -eq 3 ]]; then
-                if ! cdsi_install_component "$i" all; then
-                    CDSI_CURRENT_STAGE="MENU"
-                    log_warning "Certbot is deferred; the WordPress site remains available over HTTP."
-                    log_warning "Fix DNS/port 80, then run: sudo bash scripts/install-certbot.sh"
-                fi
-            else
-                cdsi_install_component "$i" all
-            fi
+            cdsi_install_component "$i" all
         fi
     done
+}
+
+# Select the active-domain state that the base WordPress install may consume.
+# A malformed file is ignored through /dev/null without changing it on disk.
+cdsi_prepare_install_domain_state() {
+    local domain_file="${CDSI_DOMAIN_FILE:-${CDSI_ROOT}/config/domain}"
+    local active_domain=""
+
+    CDSI_BASE_DOMAIN_FILE="$domain_file"
+    active_domain="$(cdsi_domain_state_read "$domain_file" 2>/dev/null || true)"
+    [[ -n "$active_domain" ]] || return 0
+    if cdsi_normalize_domain_list "$active_domain" >/dev/null; then
+        return 0
+    fi
+
+    CDSI_BASE_DOMAIN_FILE="/dev/null"
+    log_warning "Ignoring invalid active domain state during the base installation: ${domain_file}"
+    log_warning "The invalid file was left unchanged; configure or clear the domain explicitly after installation."
+}
+
+# Optional final domain/HTTPS setup. Empty input or EOF preserves the current
+# active/pending state and never changes the successful base installation.
+cdsi_configure_optional_domain_https() {
+    local requested_domain="${1:-}"
+    local normalized_domain="" active_domain="" pending_domain=""
+    local domain_file="${CDSI_DOMAIN_FILE:-${CDSI_ROOT}/config/domain}"
+    local pending_file="${CDSI_PENDING_DOMAIN_FILE:-${CDSI_ROOT}/config/domain.pending}"
+    local configure_rc=0
+    local selected_domain=""
+    local -a configure_args=()
+
+    CDSI_CURRENT_STAGE="CONFIGURE_DOMAIN_HTTPS"
+    active_domain="$(cdsi_domain_state_read "$domain_file" 2>/dev/null || true)"
+    active_domain="$(cdsi_normalize_domain_list "$active_domain" 2>/dev/null || true)"
+    pending_domain="$(cdsi_domain_state_read "$pending_file" 2>/dev/null || true)"
+    pending_domain="$(cdsi_normalize_domain_list "$pending_domain" 2>/dev/null || true)"
+
+    log_blank
+    log_separator
+    printf "  %b可选域名与 HTTPS / Optional Domain & HTTPS%b\n" \
+        "${CLR_BOLD}" "${CLR_RESET}"
+    log_separator
+    [[ -z "$active_domain" ]] \
+        || printf "  当前域名 / Active:  %s\n" "$active_domain"
+    [[ -z "$pending_domain" ]] \
+        || printf "  待解析 / Pending:   %s\n" "$pending_domain"
+
+    while true; do
+        if [[ -z "$requested_domain" ]]; then
+            printf "  %b域名%b (Enter 跳过；输入 ip 可尝试公网 IP HTTPS): " \
+                "${CLR_BLINK}" "${CLR_RESET}"
+            if ! read -r requested_domain; then
+                requested_domain=""
+            fi
+        fi
+
+        if [[ -z "$requested_domain" ]]; then
+            CDSI_COMP_OPTIONAL_STATUS[$CDSI_CERTBOT_COMPONENT_INDEX]="skipped"
+            if [[ -n "$active_domain" ]]; then
+                log_info "Domain/HTTPS setup skipped; the current site configuration was preserved."
+            else
+                log_info "Domain/HTTPS setup skipped; WordPress remains available over IP HTTP."
+            fi
+            CDSI_CURRENT_STAGE="MENU"
+            return 0
+        fi
+
+        if [[ "${requested_domain,,}" == ip ]]; then
+            selected_domain=""
+            configure_args=(--ip)
+            break
+        fi
+        if normalized_domain="$(cdsi_normalize_domain_list "$requested_domain")"; then
+            requested_domain="$normalized_domain"
+            selected_domain="$normalized_domain"
+            configure_args=("$requested_domain")
+            break
+        fi
+
+        log_warning "Invalid domain. Use DNS hostnames only, or press Enter to skip."
+        requested_domain=""
+    done
+
+    if logger_run_component "${CDSI_ROOT_CMD[@]}" env \
+        CDSI_DOMAIN_FILE="$domain_file" \
+        CDSI_PENDING_DOMAIN_FILE="$pending_file" \
+        CDSI_CERT_EMAIL="${CDSI_CERT_EMAIL:-}" \
+        CDSI_DOMAIN="$selected_domain" \
+        bash "${CDSI_ROOT}/scripts/configure-https.sh" "${configure_args[@]}"; then
+        configure_rc=0
+    else
+        configure_rc=$?
+    fi
+
+    if [[ "$configure_rc" -eq 0 ]]; then
+        CDSI_COMP_DONE[$CDSI_CERTBOT_COMPONENT_INDEX]=true
+        CDSI_COMP_OPTIONAL_STATUS[$CDSI_CERTBOT_COMPONENT_INDEX]=""
+        log_success "Optional domain/HTTPS setup complete."
+    elif [[ "$configure_rc" -eq "$CDSI_COMPONENT_DEFERRED" ]]; then
+        CDSI_COMP_OPTIONAL_STATUS[$CDSI_CERTBOT_COMPONENT_INDEX]="deferred"
+        log_warning "Domain/HTTPS setup was deferred; the current HTTP site remains available."
+        log_warning "Retry later from the main menu or run: sudo bash scripts/configure-https.sh"
+    elif (( configure_rc >= 129 && configure_rc <= 192 )); then
+        CDSI_COMP_OPTIONAL_STATUS[$CDSI_CERTBOT_COMPONENT_INDEX]="interrupted"
+        log_warning "Domain/HTTPS setup was interrupted (exit code ${configure_rc})."
+        return "$configure_rc"
+    else
+        CDSI_COMP_OPTIONAL_STATUS[$CDSI_CERTBOT_COMPONENT_INDEX]="failed"
+        log_error "Optional domain/HTTPS setup failed (exit code ${configure_rc}); required component installation remains complete."
+        log_warning "Review the final service and site checks below before using the site."
+        log_warning "Retry later from the main menu or run: sudo bash scripts/configure-https.sh"
+    fi
+    CDSI_CURRENT_STAGE="MENU"
+    return 0
 }
 
 # Print installation summary.
@@ -222,23 +337,30 @@ cdsi_summary() {
     log_separator
     printf "  %bInstallation Summary%b\n" "${CLR_BOLD}" "${CLR_RESET}"
     log_separator
-    local i all_done=true
+    local i all_required_done=true
     for i in "${!CDSI_COMP_NAMES[@]}"; do
         local name="${CDSI_COMP_NAMES[$i]}"
         if [[ "${CDSI_COMP_DONE[$i]}" == true ]]; then
             printf "  %b✓%b  %s\n" "${CLR_GREEN}" "${CLR_RESET}" "$name"
         elif [[ "${CDSI_COMP_UNAVAILABLE[$i]}" == true ]]; then
             printf "  %b○%b  %s (planned)\n" "${CLR_YELLOW}" "${CLR_RESET}" "$name"
+        elif [[ -n "${CDSI_COMP_OPTIONAL_STATUS[$i]}" ]]; then
+            printf "  %b○%b  %s (optional, %s)\n" \
+                "${CLR_YELLOW}" "${CLR_RESET}" "$name" \
+                "${CDSI_COMP_OPTIONAL_STATUS[$i]}"
+        elif [[ "$i" -eq "$CDSI_CERTBOT_COMPONENT_INDEX" ]]; then
+            printf "  %b○%b  %s (optional, not configured)\n" \
+                "${CLR_YELLOW}" "${CLR_RESET}" "$name"
         else
             printf "  %b○%b  %s\n" "${CLR_DIM}" "${CLR_RESET}" "$name"
-            all_done=false
+            all_required_done=false
         fi
     done
     log_separator
-    if [[ "$all_done" == true ]]; then
-        log_success "All available components installed."
+    if [[ "$all_required_done" == true ]]; then
+        log_success "All required components installed."
     else
-        log_info "Some components were not installed. Re-run to install them."
+        log_info "Some required components were not installed. Re-run to install them."
     fi
     log_info "Log: ${CDSI_LOG_FILE}"
 }
@@ -331,9 +453,12 @@ cdsi_post_install_report() {
     fi
 
     # Resolve the final site URL once for reachability and the final access block.
-    local domain="${CDSI_DOMAIN:-}"
-    if [[ -z "$domain" && -f "${CDSI_ROOT}/config/domain" ]]; then
-        domain="$(head -1 "${CDSI_ROOT}/config/domain" 2>/dev/null | tr -d '[:space:]')"
+    local domain_file="${CDSI_DOMAIN_FILE:-${CDSI_ROOT}/config/domain}"
+    local pending_domain_file="${CDSI_PENDING_DOMAIN_FILE:-${CDSI_ROOT}/config/domain.pending}"
+    local domain=""
+    if [[ -f "$domain_file" ]]; then
+        domain="$(cdsi_domain_state_read "$domain_file" 2>/dev/null || true)"
+        domain="$(cdsi_normalize_domain_list "$domain" 2>/dev/null || true)"
     fi
     local site_url server_ip="" fallback_url=""
     if [[ -z "$domain" ]]; then
@@ -343,9 +468,10 @@ cdsi_post_install_report() {
         fi
     fi
     site_url="$(cdsi_resolve_wordpress_url "/var/www/wordpress" "$domain" "$fallback_url")"
-    if [[ -f "${CDSI_ROOT}/config/domain.pending" ]]; then
+    if [[ -f "$pending_domain_file" ]]; then
         local pending_domain=""
-        pending_domain="$(cdsi_domain_state_read "${CDSI_ROOT}/config/domain.pending" 2>/dev/null || true)"
+        pending_domain="$(cdsi_domain_state_read "$pending_domain_file" 2>/dev/null || true)"
+        pending_domain="$(cdsi_normalize_domain_list "$pending_domain" 2>/dev/null || true)"
         [[ -z "$pending_domain" ]] \
             || printf "\n  %b待解析域名 / Pending Domain:%b %s\n" "${CLR_YELLOW}" "${CLR_RESET}" "$pending_domain"
     fi
@@ -436,113 +562,11 @@ cdsi_view_passwords() {
     log_info "These files are mode 600 — keep them secure and never commit them."
 }
 
-# Domain prompt + interactive install menu (top-level option 1).
+# Interactive install menu (top-level option 1).
 cdsi_run_install_flow() {
     CDSI_CURRENT_STAGE="MENU"
-
-    # Domain prompt (optional) — drives the WordPress URL and the Certbot cert.
-    # Saved to config/domain so standalone component runs also pick it up.
-    local CDSI_DOMAIN_FILE="${CDSI_DOMAIN_FILE:-${CDSI_ROOT}/config/domain}"
-    local CDSI_PENDING_DOMAIN_FILE="${CDSI_PENDING_DOMAIN_FILE:-${CDSI_ROOT}/config/domain.pending}"
-    local _domain_from_active=false
-    if [[ -z "${CDSI_DOMAIN:-}" ]] && [[ -f "$CDSI_DOMAIN_FILE" ]]; then
-        CDSI_DOMAIN="$(cdsi_domain_state_read "$CDSI_DOMAIN_FILE" 2>/dev/null || true)"
-        _domain_from_active=true
-    fi
-
-    local _normalized_domain=""
-    if [[ -n "${CDSI_DOMAIN:-}" ]]; then
-        if _normalized_domain="$(cdsi_normalize_domain_list "$CDSI_DOMAIN")"; then
-            CDSI_DOMAIN="$_normalized_domain"
-            log_info "Using existing domain: ${CDSI_DOMAIN}"
-        else
-            log_warning "Ignoring an invalid domain value. Enter a DNS hostname such as cdsi.example.com."
-            CDSI_DOMAIN=""
-        fi
-    fi
-    if [[ -z "${CDSI_DOMAIN:-}" ]]; then
-        local _domain_input=""
-        while true; do
-            printf "  %b域名%b (Domain, optional — for WordPress URL + SSL; leave empty to use the server IP): " "${CLR_BLINK}" "${CLR_RESET}"
-            if ! read -r _domain_input; then
-                _domain_input=""
-            fi
-            if [[ -z "$_domain_input" ]]; then
-                # An invalid persisted value must not be rediscovered by the
-                # standalone component subprocesses after the user chooses IP.
-                if [[ -f "$CDSI_DOMAIN_FILE" ]] \
-                   && ! rm -f "$CDSI_DOMAIN_FILE"; then
-                    log_error "Could not clear invalid persisted domain: ${CDSI_DOMAIN_FILE}"
-                    return 1
-                fi
-                CDSI_DOMAIN=""
-                break
-            fi
-            if ! _normalized_domain="$(cdsi_normalize_domain_list "$_domain_input")"; then
-                log_warning "Invalid domain. Use DNS hostnames only; paths, wildcards, IP addresses, and shell characters are not allowed."
-                continue
-            fi
-            CDSI_DOMAIN="$_normalized_domain"
-            break
-        done
-    fi
-
-    CDSI_DNS_VERIFIED=false
-    if [[ -n "${CDSI_DOMAIN:-}" ]]; then
-        local _server_ip=""
-        if ! cdsi_ensure_dns_tools; then
-            log_error "Could not install the system DNS query tool required for domain validation."
-            return 1
-        fi
-        _server_ip="$(cdsi_resolve_wordpress_server_ip "/var/www/wordpress" || true)"
-        if [[ -z "$_server_ip" ]]; then
-            log_error "Could not determine the public server IP for DNS validation."
-            return 1
-        fi
-        if cdsi_domain_dns_ready "$CDSI_DOMAIN" "$_server_ip"; then
-            CDSI_DNS_VERIFIED=true
-            if ! cdsi_domain_state_write "$CDSI_DOMAIN_FILE" "$CDSI_DOMAIN"; then
-                log_error "Could not save the verified domain: ${CDSI_DOMAIN_FILE}"
-                return 1
-            fi
-            rm -f -- "$CDSI_PENDING_DOMAIN_FILE"
-            if [[ "$CDSI_DNS_STATUS" == ready ]]; then
-                log_success "${CDSI_DNS_MESSAGE}"
-            else
-                log_warning "${CDSI_DNS_MESSAGE}"
-                log_warning "Continuing because CDSI_ALLOW_DNS_MISMATCH=true was explicitly set."
-            fi
-            log_info "Active domain: ${CDSI_DOMAIN}"
-        elif [[ "$_domain_from_active" == true \
-             && -f "/var/www/wordpress/wp-load.php" ]]; then
-            # Do not silently redirect an existing domain site back to its IP
-            # during a temporary resolver outage. Certificate issuance still
-            # performs its own strict DNS check and will be deferred.
-            log_warning "${CDSI_DNS_MESSAGE}"
-            log_warning "Keeping the previously active domain; HTTPS issuance will be deferred."
-            CDSI_DNS_VERIFIED=true
-        else
-            if ! cdsi_domain_state_write "$CDSI_PENDING_DOMAIN_FILE" "$CDSI_DOMAIN"; then
-                log_error "Could not save the pending domain: ${CDSI_PENDING_DOMAIN_FILE}"
-                return 1
-            fi
-            if [[ "$_domain_from_active" == true ]]; then
-                rm -f -- "$CDSI_DOMAIN_FILE" || {
-                    log_error "Could not demote the unresolved active domain: ${CDSI_DOMAIN_FILE}"
-                    return 1
-                }
-            fi
-            log_warning "${CDSI_DNS_MESSAGE}"
-            log_warning "Domain saved as pending; installation will remain reachable through the server IP."
-            CDSI_DOMAIN=""
-        fi
-    fi
-    # Cert email: defaults to admin@<domain> (used by certbot for the ACME
-    # account). Override with CDSI_CERT_EMAIL=you@example.com if needed.
-    if [[ -z "${CDSI_CERT_EMAIL:-}" ]] && [[ -n "${CDSI_DOMAIN:-}" ]]; then
-        CDSI_CERT_EMAIL="admin@${CDSI_DOMAIN%%,*}"
-    fi
-    export CDSI_DOMAIN CDSI_CERT_EMAIL CDSI_DNS_VERIFIED
+    local requested_domain="${CDSI_DOMAIN:-}"
+    local configured_domain_file="${CDSI_DOMAIN_FILE:-${CDSI_ROOT}/config/domain}"
 
     while true; do
         cdsi_show_menu
@@ -561,10 +585,20 @@ cdsi_run_install_flow() {
         case "$choice" in
             0)
                 log_info "Installing all components..."
+                cdsi_prepare_install_domain_state
+                CDSI_DOMAIN_FILE="$CDSI_BASE_DOMAIN_FILE"
+                export CDSI_DOMAIN_FILE
+                CDSI_DOMAIN=""
+                export CDSI_DOMAIN
                 cdsi_install_all
+                CDSI_DOMAIN_FILE="$configured_domain_file"
+                export CDSI_DOMAIN_FILE
+                CDSI_DOMAIN="$requested_domain"
+                export CDSI_DOMAIN
+                cdsi_configure_optional_domain_https "$requested_domain"
                 cdsi_summary
                 cdsi_post_install_report
-                log_info "安装流程已结束，验收报告已输出；请核对组件摘要与 HTTPS 状态。"
+                log_info "安装流程已结束，验收报告已输出；域名和 HTTPS 可随时从主菜单补充配置。"
                 exit 0
                 ;;
             [1-9])

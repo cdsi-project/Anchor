@@ -8,11 +8,11 @@
 > 当前事实以根目录 [README](../README.md)、[INSTALL](../INSTALL.md) 和
 > [AGENTS](../AGENTS.md) 为准；当前入口是 `sudo ./install.sh`。
 
-当前 M0 / Installer v0.3.2 进度：
+当前 M0 / Installer v0.3.3 进度：
 
 | 状态 | 内容 |
 | --- | --- |
-| 已实现 | Ubuntu 24.04/26.04、Debian 13 与 CentOS Stream 10 路由、日志与预检、Nginx、MySQL/MariaDB、PHP-FPM、WordPress、域名、Certbot、组件级幂等、最终访问信息、Beacon Application Password、卸载、APT/DNF 重试、CDN SHA-256 校验；Debian 13 使用默认源 MariaDB 11.8、PHP 8.4 和 Certbot 4.0 |
+| 已实现 | Ubuntu 24.04/26.04、Debian 13 与 CentOS Stream 10 路由、日志与预检、Nginx、MySQL/MariaDB、PHP-FPM、WordPress、最后可跳过的域名/Certbot/HTTPS 步骤、组件级幂等、最终访问信息、Beacon Application Password、卸载、APT/DNF 重试、CDN SHA-256 校验；Debian 13 使用默认源 MariaDB 11.8、PHP 8.4 和 Certbot 4.0 |
 | 独立可用 | Redis、Supervisor（仅 Ubuntu）；不进入主菜单和“安装全部” |
 | 部分实现 | `/etc/cdsi` 配置助手、整机集成验收、持久日志与故障恢复 |
 | 未实现 | Composer/CDSI Core 部署、`cdsi` CLI/doctor/update、断点续装、完整服务器备份恢复、队列 Worker |
@@ -1484,8 +1484,8 @@ Codex 实现时遵循以下规则：
 # 31. 历史里程碑说明
 
 本文最初要求只实现 Installer Skeleton、Logger、Preflight 和 Error
-Handling；该里程碑已经完成，Nginx、PHP-FPM、MySQL、Certbot 和 WordPress
-主流程也已实现。不得再依据旧清单禁止这些组件或从不存在的
+Handling；该里程碑已经完成，Nginx、PHP-FPM、MySQL 和 WordPress 基础主流程，
+以及可选的 Certbot/域名/HTTPS 最终步骤也已实现。不得再依据旧清单禁止这些组件或从不存在的
 旧版设想中的目录结构重新搭建工程。
 
 当前最高优先级是对 `sudo ./install.sh` 进行干净服务器、重复执行、部分失败、

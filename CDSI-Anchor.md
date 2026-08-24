@@ -6,7 +6,7 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 服务器基础设施安装工具，它把一台受支持的服务器配置为可访问的 OpenWeb(WordPress)
 节点。
 
-> 当前状态：M0 集成与加固，Installer v0.3.2。
+> 当前状态：M0 集成与加固，Installer v0.3.3。
 
 ## 当前实现
 
@@ -14,19 +14,21 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 
 - 用户只需执行简单交互，即可快速配置Linux服务器环境
 - 安装 Nginx、MySQL/MariaDB、PHP、Wordpress等开源软件，无需额外付费
-- 自动配置 WordPress 作为 OpenWeb 站点；域名验证通过后配置 HTTPS
-- 没有域名时保持 `http://<服务器 IP>`，后续可独立配置域名或显式尝试 IP HTTPS
+- 先自动配置 WordPress 作为可通过 IP HTTP 访问的 OpenWeb 站点，再把域名与
+  HTTPS 作为最后一个可选步骤
+- 最后一步可直接按 Enter 跳过；没有域名时保持 `http://<服务器 IP>`，后续可
+  独立配置域名或显式尝试 IP HTTPS
 - 自动创建 WordPress 管理员和 [CDSI Beacon](https://github.com/cdsi-project/Beacon) 自动发布文章API
 
-当前默认组件：
+当前组件入口：
 
 | 组件 | 入口 | 状态 |
 | --- | --- | --- |
 | Nginx | `scripts/install-nginx.sh` | 默认安装 |
 | MySQL/MariaDB | `scripts/install-mysql.sh` | 默认安装，按平台选择系统包 |
 | PHP-FPM | `scripts/install-php.sh` | 默认安装 |
-| Certbot | `scripts/install-certbot.sh` | 默认安装 |
 | WordPress | `scripts/install-wordpress.sh` | 默认安装 |
+| Certbot | `scripts/install-certbot.sh` | 可选最后一步，也可独立安装 |
 | Redis | `scripts/install-redis.sh` | 需要时可单独安装 |
 | Supervisor | `scripts/install-supervisor.sh` | 需要时可单独安装 |
 
@@ -37,12 +39,12 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.2/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.3/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
 根目录 `bootstrap.sh` 会刷新系统默认源的元数据，安装 Git、Bash、curl、CA
-证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.2` 发布标签，
+证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.3` 发布标签，
 然后进入 `install.sh`。它不会改写软件源或执行全系统升级。
 
 已有 Git 时也可手动克隆：
@@ -89,7 +91,8 @@ HTTPS，但不满足 IP 证书能力要求。
 
 ## 安装结果
 
-“安装全部”完成后，终端会显示：
+“安装全部”会先完成基础站点，再询问是否配置域名/HTTPS；按 Enter 跳过也会
+继续显示：
 
 ```text
 网站地址

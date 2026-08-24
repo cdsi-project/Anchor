@@ -44,7 +44,7 @@ cdsi_platform_init
 
 # ── CDSI Constants ──────────────────────────────────────────
 readonly CDSI_APP_NAME="CDSI"
-readonly CDSI_VERSION="0.3.2"
+readonly CDSI_VERSION="0.3.3"
 
 readonly CDSI_CONFIG_DIR="/etc/cdsi"
 readonly CDSI_APP_DIR="/var/www/cdsi"

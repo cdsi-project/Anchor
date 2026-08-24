@@ -507,15 +507,15 @@ Nginx
 PHP-FPM
 MySQL
 WordPress OpenWeb
-HTTPS（域名与 DNS 就绪时）
 Beacon Application Password
+可选最终步骤：域名与 HTTPS
         ↓
 CDSI Node
 ```
 
-当前 Anchor Installer v0.3.2 已实现这条五组件主流程。Redis 与 Supervisor
-脚本仍可独立运行，但暂不属于默认安装；CDSI Core、`cdsi` CLI/doctor 和完整
-服务器恢复仍是后续工作。
+当前 Anchor Installer v0.3.3 已实现四项基础组件与可选最终 Certbot/HTTPS
+流程。域名步骤可以按 Enter 跳过；Redis 与 Supervisor 脚本仍可独立运行，但
+暂不属于默认安装；CDSI Core、`cdsi` CLI/doctor 和完整服务器恢复仍是后续工作。
 
 基础设施可以复杂。
 
@@ -1128,13 +1128,14 @@ Nginx
 PHP-FPM
 MySQL
 WordPress OpenWeb
-HTTPS (when domain and DNS are ready)
 Beacon Application Password
+Optional final step: domain and HTTPS
         ↓
 CDSI Node
 ```
 
-Anchor Installer v0.3.2 implements this five-component primary path. Redis and
+Anchor Installer v0.3.3 implements the four-component base path plus optional
+final Certbot/HTTPS setup. The domain step can be skipped with Enter. Redis and
 Supervisor remain independently runnable scripts but are not part of the
 default installation. CDSI Core, the `cdsi` CLI/doctor, and complete server
 recovery remain future work.
