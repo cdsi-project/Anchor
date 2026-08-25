@@ -62,6 +62,8 @@ source "${CDSI_ROOT}/lib/platform.sh"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=lib/packages.sh
 source "${CDSI_ROOT}/lib/packages.sh"
 # shellcheck source=lib/services.sh
@@ -139,7 +141,7 @@ purge_glob() {
             done < <(dpkg-query -W -f='${Package} ${Status}\n' "$pattern" 2>/dev/null \
                 | awk '$NF=="installed"{print $1}' || true)
             ;;
-        dnf)
+        dnf|zypper)
             while IFS= read -r p; do
                 [[ -n "$p" && "$p" == $pattern ]] && pkgs+=("$p")
             done < <(rpm -qa --qf '%{NAME}\n' 2>/dev/null || true)
@@ -163,6 +165,10 @@ purge_glob() {
 
 # Remove orphaned dependencies through the active package manager.
 autoremove() {
+    if [[ "$CDSI_PACKAGE_BACKEND" == "zypper" ]]; then
+        log "Zypper has no safe equivalent for Anchor's package autoremove step; skipping orphan cleanup."
+        return 0
+    fi
     if [[ "$DRY_RUN" == true ]]; then
         log_dry "将通过 ${CDSI_PACKAGE_BACKEND} 自动删除孤立依赖"
         return 0
@@ -174,22 +180,22 @@ autoremove() {
 _mysql_root() {
     local pw=""
     if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
-        "${SUDO[@]}" mysql -u root "$@"
+        "${SUDO[@]}" "$CDSI_DB_CLIENT" --protocol=socket -u root "$@"
         return
     fi
     if [[ -f "${PASS_DIR}/mysql.pass" ]]; then
         pw="$(grep '^root:' "${PASS_DIR}/mysql.pass" 2>/dev/null | cut -d: -f2- || true)"
     fi
     if [[ -n "$pw" ]]; then
-        "${SUDO[@]}" mysql -u root -p"$pw" "$@"
+        "${SUDO[@]}" "$CDSI_DB_CLIENT" -u root -p"$pw" "$@"
     else
-        "${SUDO[@]}" mysql -u root "$@"
+        "${SUDO[@]}" "$CDSI_DB_CLIENT" --protocol=socket -u root "$@"
     fi
 }
 
 # Drop the installer-managed database/user without violating --dry-run.
 drop_cdsi_database() {
-    command -v mysql >/dev/null 2>&1 || return 0
+    command -v "$CDSI_DB_CLIENT" >/dev/null 2>&1 || return 0
     if [[ "$DRY_RUN" == true ]]; then
         log_dry "将删除 MySQL 数据库 cdsi 和用户 'cdsi'@'localhost'"
         return 0
@@ -285,47 +291,84 @@ remove_anchor_firewall_services() {
 
 remove_anchor_selinux_state() {
     local fcontext_marker="/etc/cdsi/selinux-wordpress-fcontext"
-    local boolean_marker="/etc/cdsi/selinux-httpd-db-boolean"
-    local pattern=""
+    local pattern="" fcontext_present=false boolean_present=false
+    local boolean_marker="" expected_boolean="" boolean_name=""
+    local boolean_index=""
+    local boolean_markers=(
+        "/etc/cdsi/selinux-httpd-network-boolean"
+        "/etc/cdsi/selinux-httpd-db-boolean"
+    )
+    local expected_booleans=(
+        "httpd_can_network_connect"
+        "httpd_can_network_connect_db"
+    )
+    local boolean_marker_present=(false false)
 
+    # Validate every provenance marker before changing any global SELinux
+    # state. A damaged sibling marker must never cause a partial rollback.
     if [[ -f "$fcontext_marker" ]]; then
+        fcontext_present=true
         pattern="$(read_root_marker "$fcontext_marker")" \
             || { log_warn "无法读取 SELinux 文件上下文记录。"; return 1; }
         if [[ "$pattern" != "/var/www/wordpress(/.*)?" ]]; then
             log_warn "SELinux 文件上下文记录无效，未自动删除规则。"
             return 1
-        elif [[ "$DRY_RUN" == true ]]; then
-            log_dry "将删除 Anchor 添加的 SELinux 文件上下文: $pattern"
-            log_dry "将删除: $fcontext_marker"
-        elif command -v semanage >/dev/null 2>&1; then
-            "${SUDO[@]}" semanage fcontext -d "$pattern" \
-                || { log_warn "无法删除 SELinux 文件上下文规则。"; return 1; }
-            "${SUDO[@]}" rm -f -- "$fcontext_marker"
-        else
-            log_warn "semanage 不可用，无法回滚 SELinux 文件上下文。"
-            return 1
         fi
     fi
 
-    if [[ -f "$boolean_marker" ]]; then
-        local boolean_name=""
+    for boolean_index in "${!boolean_markers[@]}"; do
+        boolean_marker="${boolean_markers[$boolean_index]}"
+        expected_boolean="${expected_booleans[$boolean_index]}"
+        [[ -f "$boolean_marker" ]] || continue
+        boolean_present=true
+        boolean_marker_present[$boolean_index]=true
         boolean_name="$(read_root_marker "$boolean_marker")" \
             || { log_warn "无法读取 SELinux 布尔值记录。"; return 1; }
-        if [[ "$boolean_name" != "httpd_can_network_connect_db" ]]; then
+        if [[ "$boolean_name" != "$expected_boolean" ]]; then
             log_warn "SELinux 布尔值记录无效，未自动回滚。"
             return 1
-        elif [[ "$DRY_RUN" == true ]]; then
-            log_dry "将恢复 SELinux 布尔值: httpd_can_network_connect_db=off"
-            log_dry "将删除: $boolean_marker"
-        elif command -v setsebool >/dev/null 2>&1; then
-            "${SUDO[@]}" setsebool -P httpd_can_network_connect_db off \
-                || { log_warn "无法恢复 SELinux 数据库连接布尔值。"; return 1; }
-            "${SUDO[@]}" rm -f -- "$boolean_marker"
-        else
-            log_warn "setsebool 不可用，无法回滚 SELinux 布尔值。"
-            return 1
         fi
+    done
+
+    if [[ "$DRY_RUN" == true ]]; then
+        if [[ "$fcontext_present" == true ]]; then
+            log_dry "将删除 Anchor 添加的 SELinux 文件上下文: $pattern"
+            log_dry "将删除: $fcontext_marker"
+        fi
+        for boolean_index in "${!boolean_markers[@]}"; do
+            [[ "${boolean_marker_present[$boolean_index]}" == true ]] || continue
+            boolean_marker="${boolean_markers[$boolean_index]}"
+            expected_boolean="${expected_booleans[$boolean_index]}"
+            log_dry "将恢复 SELinux 布尔值: ${expected_boolean}=off"
+            log_dry "将删除: $boolean_marker"
+        done
+        return 0
     fi
+
+    if [[ "$fcontext_present" == true ]] \
+       && ! command -v semanage >/dev/null 2>&1; then
+        log_warn "semanage 不可用，无法回滚 SELinux 文件上下文。"
+        return 1
+    fi
+    if [[ "$boolean_present" == true ]] \
+       && ! command -v setsebool >/dev/null 2>&1; then
+        log_warn "setsebool 不可用，无法回滚 SELinux 布尔值。"
+        return 1
+    fi
+
+    if [[ "$fcontext_present" == true ]]; then
+        "${SUDO[@]}" semanage fcontext -d "$pattern" \
+            || { log_warn "无法删除 SELinux 文件上下文规则。"; return 1; }
+        "${SUDO[@]}" rm -f -- "$fcontext_marker"
+    fi
+    for boolean_index in "${!boolean_markers[@]}"; do
+        [[ "${boolean_marker_present[$boolean_index]}" == true ]] || continue
+        boolean_marker="${boolean_markers[$boolean_index]}"
+        expected_boolean="${expected_booleans[$boolean_index]}"
+        "${SUDO[@]}" setsebool -P "$expected_boolean" off \
+            || { log_warn "无法恢复 SELinux 网络连接布尔值。"; return 1; }
+        "${SUDO[@]}" rm -f -- "$boolean_marker"
+    done
 }
 
 remove_anchor_epel() {
@@ -394,14 +437,17 @@ uninstall_mysql() {
     stop_disable_svc "$CDSI_DB_SERVICE"
     if cdsi_is_centos_stream; then
         purge_glob 'mysql8.4*'
-        do_rm /etc/my.cnf.d/zz-cdsi-anchor.cnf
+        do_rm "$CDSI_DB_ANCHOR_CONFIG"
     elif cdsi_is_debian; then
         # Anchor <= v0.3.0 installed this legacy meta-package.
         purge_glob 'default-mysql-server*'
         purge_glob 'mariadb-server*'
         purge_glob 'mariadb-client*'
         purge_glob 'mariadb-common'
-        do_rm /etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf
+        do_rm "$CDSI_DB_ANCHOR_CONFIG"
+    elif cdsi_is_opensuse_leap; then
+        purge_packages mariadb mariadb-client
+        do_rm "$CDSI_DB_ANCHOR_CONFIG"
     else
         purge_glob 'mysql-server*'
         purge_glob 'mysql-client*'
@@ -431,6 +477,11 @@ uninstall_php() {
         pkgs=(php php-cli php-fpm php-common php-mbstring php-xml php-bcmath \
               php-intl php-mysqlnd php-process php-opcache php-pecl-redis6 \
               php-gd php-pecl-zip php-pecl-imagick)
+    elif cdsi_is_opensuse_leap; then
+        pkgs=(php8 php8-cli php8-fpm php8-bcmath php8-ctype php8-curl php8-dom \
+              php8-fileinfo php8-gd php8-iconv php8-intl php8-mbstring \
+              php8-mysql php8-opcache php8-openssl php8-phar php8-posix php8-redis \
+              php8-tokenizer php8-xmlreader php8-xmlwriter php8-zip)
     else
         pkgs=(php-cli php-fpm php-common php-curl php-mbstring php-xml php-zip \
               php-bcmath php-intl php-mysql php-opcache php-redis php-gd php-imagick)
@@ -714,7 +765,12 @@ uninstall_certbot() {
     fi
     stop_disable_svc certbot.timer
     stop_disable_svc certbot-renew.timer
-    purge_packages certbot python3-certbot-nginx
+    if cdsi_is_opensuse_leap; then
+        purge_packages python313-certbot python313-certbot-nginx \
+            certbot-systemd-timer
+    else
+        purge_packages certbot python3-certbot-nginx
+    fi
     log_ok "Certbot 已卸载 (证书与 Nginx SSL 指令已清理)。"
 }
 
@@ -766,7 +822,7 @@ UNINSTALL_ORDER=(certbot wordpress php redis supervisor nginx mysql)
 is_installed() {
     case "$1" in
         nginx)     command -v nginx >/dev/null 2>&1 ;;
-        mysql)     command -v mysql >/dev/null 2>&1 || cdsi_service_installed "$CDSI_DB_SERVICE" ;;
+        mysql)     command -v "$CDSI_DB_CLIENT" >/dev/null 2>&1 || cdsi_service_installed "$CDSI_DB_SERVICE" ;;
         php)       command -v php-fpm >/dev/null 2>&1 || command -v php >/dev/null 2>&1 ;;
         redis)     cdsi_is_ubuntu && command -v redis-server >/dev/null 2>&1 ;;
         supervisor) cdsi_is_ubuntu && command -v supervisord >/dev/null 2>&1 ;;
@@ -785,6 +841,8 @@ comp_what() {
                 echo "${CDSI_DB_PACKAGE} 包 + Anchor 配置 /etc/my.cnf.d/zz-cdsi-anchor.cnf + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
             elif cdsi_is_debian; then
                 echo "${CDSI_DB_PACKAGE} 包 + Anchor 配置 /etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
+            elif cdsi_is_opensuse_leap; then
+                echo "${CDSI_DB_PACKAGE}/mariadb-client 包 + Anchor 配置 ${CDSI_DB_ANCHOR_CONFIG} + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
             else
                 echo "${CDSI_DB_PACKAGE} 包 + /etc/mysql 配置 + /var/lib/mysql 数据 + cdsi 库/用户 + password/mysql.pass"
             fi
@@ -792,7 +850,13 @@ comp_what() {
         php)       echo "php-cli/php-fpm/扩展/php-common 全部包" ;;
         redis)     echo "所有已安装 redis* 包 + /etc/redis + /var/lib/redis + password/redis.pass" ;;
         supervisor) echo "supervisor 包 + /etc/supervisor" ;;
-        certbot)   echo "certbot/python3-certbot-nginx 包 + /etc/letsencrypt 证书 + Nginx SSL 指令" ;;
+        certbot)
+            if cdsi_is_opensuse_leap; then
+                echo "python313-certbot/python313-certbot-nginx/certbot-systemd-timer 包 + /etc/letsencrypt 证书 + Nginx SSL 指令"
+            else
+                echo "certbot/python3-certbot-nginx 包 + /etc/letsencrypt 证书 + Nginx SSL 指令"
+            fi
+            ;;
         wordpress) echo "/var/www/wordpress + Nginx 站点块 + cdsi 库 + WordPress/Beacon 凭据 + wp-cli" ;;
     esac
 }
@@ -912,7 +976,7 @@ done
 main() {
     if ! cdsi_platform_supported; then
         log_fail "不支持的操作系统: ${CDSI_OS_PRETTY}。卸载器未做任何修改。"
-        log "Anchor 支持 Ubuntu Server 24.04/26.04 LTS、Debian 13 和 CentOS Stream 10。"
+        log "Anchor 支持 Ubuntu Server 24.04/26.04 LTS、Debian 13、CentOS Stream 10 和 openSUSE Leap 16.0。"
         return 3
     fi
     log "CDSI Uninstaller 启动。"

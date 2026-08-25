@@ -140,12 +140,13 @@ Infrastructure complexity should be pushed below the user-facing layer wherever 
 
 The project is currently in:
 
-# M0 — Anchor Installer v0.3.4 Integration and Hardening
+# M0 — Anchor Installer v0.3.5 Integration and Hardening
 
 Current priority:
 
 > Make the implemented WordPress OpenWeb installation path reliable on clean
-> and partially configured supported Ubuntu, Debian, and CentOS Stream servers.
+> and partially configured supported Ubuntu, Debian, CentOS Stream, and
+> openSUSE Leap servers.
 
 The current working baseline already includes:
 
@@ -154,7 +155,8 @@ The current working baseline already includes:
 - preflight, logging, and component orchestration in `install.sh`
 - required Nginx, MySQL/MariaDB, PHP-FPM, and WordPress installation followed
   by optional final domain/HTTPS and Certbot setup
-- Ubuntu/Debian APT and CentOS DNF package backends with bounded retry
+- Ubuntu/Debian APT, CentOS DNF, and openSUSE Zypper package backends with
+  bounded retry
 - system-default base stack packages and explicitly bounded EPEL use on CentOS
 - strict A/AAAA domain activation with separate active and pending state
 - standalone domain and HTTPS configuration, including capability-gated IP TLS
@@ -188,10 +190,10 @@ Do not expand scope into these areas unless explicitly requested.
 The implemented deployment stack and optional TLS path are:
 
 ```text
-OS           Ubuntu Server 24.04/26.04 LTS, Debian 13, or CentOS Stream 10
+OS           Ubuntu Server 24.04/26.04 LTS, Debian 13, CentOS Stream 10, or openSUSE Leap 16.0
 Web          Nginx
-Runtime      PHP-FPM; Debian 13 uses PHP 8.4
-Database     MySQL on Ubuntu/CentOS; MariaDB 11.8 on Debian 13
+Runtime      PHP-FPM; Debian 13 and openSUSE Leap 16.0 use PHP 8.4
+Database     MySQL on Ubuntu/CentOS; MariaDB 11.8 on Debian 13/openSUSE Leap 16.0
 SSL          Let's Encrypt / Certbot for verified domains; explicit supported public IPs
 OpenWeb      WordPress
 Integration  CDSI Beacon WordPress Application Password
@@ -235,6 +237,27 @@ Debian 13 must keep these explicit boundaries:
 - use `www-data:www-data` for WordPress/FPM ownership
 - keep Redis and Supervisor unavailable on the Debian route
 
+openSUSE Leap 16.0 must keep these explicit boundaries:
+
+- support Leap 16.0 only, using the configured system-default Zypper
+  repositories; do not add OBS, Packman, or another third-party repository
+- load the Anchor Nginx site from `/etc/nginx/conf.d`
+- install MariaDB 11.8 with the `mariadb` and `mariadb-client` packages, use the
+  `mariadb` service and MariaDB-compatible SQL, and preserve socket-based root
+  authentication
+- keep the Anchor-owned bind configuration scoped to
+  `/etc/my.cnf.d/99-cdsi-anchor.cnf`
+- use PHP 8.4 `php8-*` packages, including the separately packaged OpenSSL,
+  OPcache, Redis, and GD extensions; use `wwwrun:www` ownership and PHP-FPM at
+  `127.0.0.1:9000`
+- modify firewalld and SELinux only when each layer is enabled, record every
+  Anchor-owned change, enable `httpd_can_network_connect` when needed for the
+  TCP PHP-FPM and outbound WordPress paths, and never disable either security layer
+- use the default Certbot 5.1 packages for domain HTTPS; this version does not
+  satisfy the Certbot 5.4+ public-IP certificate capability, so defer
+  unsupported IP HTTPS and preserve HTTP
+- keep Redis and Supervisor services unavailable on the openSUSE route
+
 Do NOT claim or prematurely implement support for:
 
 - CentOS Stream releases other than 10
@@ -242,6 +265,9 @@ Do NOT claim or prematurely implement support for:
 - Rocky Linux
 - AlmaLinux
 - Debian releases other than 13
+- openSUSE Leap releases other than 16.0
+- openSUSE Tumbleweed
+- openSUSE MicroOS
 - Apache
 - PostgreSQL
 - Docker
@@ -303,6 +329,7 @@ Anchor/
 ├── lib/
 │   ├── apt.sh
 │   ├── dnf.sh
+│   ├── zypper.sh
 │   ├── domain.sh
 │   ├── bootstrap.sh
 │   ├── common.sh
@@ -322,6 +349,7 @@ Anchor/
 │   ├── ubuntu/                   # implemented platform route
 │   ├── debian/                   # implemented Debian 13 platform route
 │   ├── centos-stream/            # implemented platform route
+│   ├── opensuse-leap/            # implemented openSUSE Leap 16.0 route
 │   ├── configure.sh
 │   └── health.sh
 ├── config/
@@ -341,10 +369,10 @@ Bash.
 
 `install.sh` owns user interaction and orchestration. Public component commands
 under `scripts/` detect the operating system and dispatch to a platform route.
-The `ubuntu/`, `debian/`, and `centos-stream/` routes are implemented. Their
-wrappers invoke the shared implementations under `scripts/common/`. Shared
-primitives belong under `lib/`. Keep these layers small and
-responsibility-focused.
+The `ubuntu/`, `debian/`, `centos-stream/`, and `opensuse-leap/` routes are
+implemented. Their wrappers invoke the shared implementations under
+`scripts/common/`. Shared primitives belong under `lib/`. Keep these layers
+small and responsibility-focused.
 
 The Install All path must establish the usable base site before asking for a
 domain: Nginx, database, PHP-FPM, then WordPress. Domain activation and HTTPS are
@@ -600,8 +628,9 @@ At minimum inspect:
 Do not modify the server before critical compatibility checks pass.
 
 The active preflight is `scripts/check-env.sh` and accepts only Ubuntu
-24.04/26.04, Debian 13, or CentOS Stream 10 on `x86_64`/`aarch64`. Every default
-component script enforces the same platform guard when run independently.
+24.04/26.04, Debian 13, CentOS Stream 10, or openSUSE Leap 16.0 on
+`x86_64`/`aarch64`. Every default component script enforces the same platform
+guard when run independently.
 
 ---
 
@@ -660,7 +689,8 @@ newer with both `--ip-address` and `--preferred-profile`, and the Let's Encrypt
 `shortlived` profile. If any capability is absent, preserve HTTP. Do not claim
 that the current CentOS Stream EPEL Certbot necessarily supports IP
 certificates. Debian 13's default Certbot 4.0 supports domain certificates but
-does not meet the public-IP requirement. Do not install an untrusted certificate
+does not meet the public-IP requirement. openSUSE Leap 16.0's default Certbot
+5.1 has the same domain-only boundary. Do not install an untrusted certificate
 as a substitute, and do not send IP certificate orders to a fallback CA.
 
 The optional `CDSI_ACME_FALLBACK_SERVER` is selected only when the primary ACME
@@ -747,11 +777,15 @@ versioned package exists without resolving the platform runtime. On CentOS, PHP
 packages and extensions must remain in BaseOS/AppStream; the PHP installer must
 not enable EPEL. Debian 13 uses PHP 8.4 from the default repository; when an
 unversioned extension package has no candidate, use the matching versioned
-system package rather than a third-party repository.
+system package rather than a third-party repository. openSUSE Leap 16.0 uses
+the default PHP 8.4 `php8-*` packages, including `php8-openssl`,
+`php8-opcache`, `php8-redis`, and `php8-gd`; do not add a third-party Zypper
+repository.
 
 The fresh-install path requires the extensions used by WordPress and Beacon's
-OpenWeb workflow, including `mysqli`, cURL, XML, mbstring, ZIP, GD, Redis, and
-OPcache. GD is the supported image-processing extension; do not install Imagick.
+OpenWeb workflow, including `mysqli`, cURL, OpenSSL, XML, mbstring, ZIP, GD,
+Redis, and OPcache. GD is the supported image-processing extension; do not
+install Imagick.
 Checks for an existing PHP installation must not claim extensions were
 installed unless they were actually verified.
 
@@ -903,9 +937,10 @@ Strict A/AAAA activation with active/pending domain state
 Independent domain clear/activate and domain/IP HTTPS commands
 Directory-only ACME fallback and capability-gated short-lived IP certificates
 Active/enabled service and certificate-renewal timer verification
-APT/DNF package installation with bounded retry
+APT/DNF/Zypper package installation with bounded retry
 CentOS Stream 10 platform route with MySQL 8.4 and explicit EPEL boundaries
 Debian 13 platform route with MariaDB 11.8, PHP 8.4, and Certbot 4.0 boundaries
+openSUSE Leap 16.0 platform route with MariaDB 11.8, PHP 8.4, Certbot 5.1, and security-layer boundaries
 Pinned SHA-256 verification for WP-CLI and WordPress downloads
 WordPress administrator and Beacon Application Password provisioning
 Final access report

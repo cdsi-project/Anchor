@@ -213,25 +213,25 @@ A creator should eventually be able to migrate away from CDSI without losing the
 ## Current Status
 
 CDSI Anchor is currently in **M0 integration and hardening**. The installer
-version is **0.3.4**.
+version is **0.3.5**.
 
-The primary path now provisions a WordPress OpenWeb node on supported Ubuntu
-Server, Debian, and CentOS Stream releases:
+The primary path now provisions a WordPress OpenWeb node on supported versions
+of Ubuntu Server, Debian, CentOS Stream, and openSUSE Leap:
 
 | Status | Scope |
 | --- | --- |
 | Implemented in `install.sh` | Preflight, the required Nginx/MySQL-or-MariaDB/PHP-FPM/WordPress stack, optional final domain/HTTPS and Certbot setup, final service/access report, and component uninstall |
-| Implemented support | Ubuntu/Debian APT and CentOS DNF/systemd routes, bounded package retries, strict domain DNS activation, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
+| Implemented support | Ubuntu/Debian APT, CentOS DNF, and openSUSE Zypper/systemd routes, bounded package retries, strict domain DNS activation, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
 | Standalone only | Redis and Supervisor scripts remain available, but are hidden from the main menu and Install All flow |
 | Planned | Composer/CDSI Core deployment, the `cdsi` CLI, `cdsi doctor`, resume/update workflows, and complete server backup/restore |
 
 The supported fresh-install runtime is deliberately narrow:
 
 ```text
-OS           Ubuntu Server 24.04/26.04 LTS, Debian 13, or CentOS Stream 10
+OS           Ubuntu Server 24.04/26.04 LTS, Debian 13, CentOS Stream 10, or openSUSE Leap 16.0
 Web          Nginx from the operating system's default source
-Runtime      PHP-FPM from the operating system's default source (PHP 8.4 on Debian 13)
-Database     MySQL on Ubuntu/CentOS; MySQL-compatible MariaDB 11.8 on Debian 13
+Runtime      PHP-FPM from the operating system's default source (PHP 8.4 on Debian 13/openSUSE Leap 16.0)
+Database     MySQL on Ubuntu/CentOS; MariaDB 11.8 on Debian 13/openSUSE Leap 16.0
 SSL          Let's Encrypt / Certbot for a verified domain; explicit IP HTTPS when supported
 OpenWeb      WordPress
 Integration  CDSI Beacon WordPress Application Password
@@ -273,15 +273,16 @@ The following are planned and should not be considered implemented by Anchor:
 
 ## 安装前准备
 
-Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13** 和
-**CentOS Stream 10**。
+Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13**、
+**CentOS Stream 10** 和 **openSUSE Leap 16.0**。
 
 ### 必需
 
 1. **一台干净的受支持 Linux 服务器**
    - 支持 `x86_64` 和 `aarch64` 架构
-   - 最低1核 CPU、2GB 内存和 10GB 根分区可用空间；推荐 4GB 内存和
-     20GB 根分区可用空间
+   - 安装脚本要求至少 1 核 CPU；预检以 1GB 内存和 10GB 根分区可用空间作为
+     警告阈值，低于阈值时会提示但允许继续
+   - 建议至少 2GB 内存，正式环境推荐 4GB 内存和 20GB 根分区可用空间
    - 登录用户需要 root 或 sudo 权限
 2. **稳定的公网入口和网络连接**
    - 准备公网 IP
@@ -302,9 +303,9 @@ Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13** 和
 公网 IP 也可以显式申请公信 HTTPS，但必须是公网 IPv4，且系统提供的 Certbot
 必须为 5.4 或更高版本并支持 Let's Encrypt `shortlived` profile。能力不足时
 Anchor 保持现有 HTTP 站点，不会安装不受信任证书，也不承诺 CentOS Stream
-当前系统包一定满足该版本要求。Debian 13 默认源提供的 Certbot 4.0 支持域名
-HTTPS，但不满足 IP 证书所需的 Certbot 5.4+ 能力。公网 IP 探测受限时可显式
-传入 `CDSI_SERVER_IP`。
+当前系统包一定满足该版本要求。Debian 13 默认源提供的 Certbot 4.0、openSUSE
+Leap 16.0 默认源提供的 Certbot 5.1 均支持域名 HTTPS，但不满足 IP 证书所需的
+Certbot 5.4+ 能力。公网 IP 探测受限时可显式传入 `CDSI_SERVER_IP`。
 
 ### 建议
 
@@ -322,7 +323,7 @@ HTTPS，但不满足 IP 证书所需的 Certbot 5.4+ 能力。公网 IP 探测�
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -330,16 +331,20 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
 脚本会自动完成以下步骤：
 
 1. 检查操作系统、CPU 架构、systemd、root/sudo 权限和交互终端。
-2. 刷新当前系统默认 APT/DNF 仓库的元数据，不改写软件源、不执行全系统升级。
+2. 刷新当前系统默认 APT/DNF/Zypper 仓库的元数据，不改写软件源、不执行全系统升级。
 3. 安装 `bash`、Git、curl、CA 证书和 coreutils。
 4. 自动进入 `install.sh` 的交互菜单。
+
+Anchor 默认保存到 `/root/cdsi-Anchor`。保存前会检查目标路径；同名普通文件、
+非 Git 目录或符号链接均不会被覆盖。已有目录只有在确认是 bootstrap 管理、
+来源可信且工作区干净的 Anchor 仓库后，才会以 fast-forward 方式更新。
 
 脚本下载到本地后再执行，因此用户可以先检查内容；非 root 用户执行时会通过
 `sudo` 请求权限。远程可执行脚本只通过 HTTPS 分发，不提供 HTTP 入口。
@@ -348,7 +353,7 @@ GitHub 下载入口：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.4/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.5/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -413,9 +418,9 @@ sudo bash scripts/install-wordpress.sh
 ```
 
 这些公开脚本会先检测操作系统，再路由到对应平台目录。
-`scripts/ubuntu/`、`scripts/debian/` 与 `scripts/centos-stream/` 已实现，并复用
-`scripts/common/` 中的组件实现。Redis 与 Supervisor 独立脚本目前仍仅支持
-Ubuntu。
+`scripts/ubuntu/`、`scripts/debian/`、`scripts/centos-stream/` 与
+`scripts/opensuse-leap/` 已实现，并复用 `scripts/common/` 中的组件实现。
+Redis 与 Supervisor 独立脚本目前仍仅支持 Ubuntu。
 
 `check-env.sh` is the active preflight implementation. `configure.sh` is a
 standalone `/etc/cdsi` configuration helper that is not yet called by the main
@@ -443,11 +448,25 @@ and systemd boot enablement. When HTTPS is configured, the available
 
 The PHP installer uses each supported operating system's default PHP stream. It
 does not add a PHP PPA/Remi repository or replace an existing global PHP
-alternative. A fresh installation provisions Redis, ZIP, GD, and OPcache. GD is
-the supported image-processing extension; Anchor does not install Imagick.
+alternative. A fresh installation provisions the Redis, ZIP, GD, and OPcache
+PHP extensions. GD is the supported image-processing extension; Anchor does
+not install Imagick.
 Debian 13 uses PHP 8.4 and its versioned extension packages from the default
 repository. The fast path verifies PHP-FPM and the complete required extension
 set before it skips reconciliation.
+
+openSUSE support is intentionally limited to Leap 16.0. Anchor uses only its
+configured default Zypper repositories: Nginx loads the Anchor site from
+`/etc/nginx/conf.d`, MariaDB 11.8 uses the `mariadb` and `mariadb-client`
+packages with the `mariadb` service and preserves socket-based root
+authentication, and PHP 8.4 uses the distribution's `php8-*` packages under
+`wwwrun:www` with PHP-FPM at `127.0.0.1:9000`.
+OpenSSL, OPcache, Redis, and GD are installed from their matching `php8-*`
+packages.
+Active firewalld and enabled SELinux policy are handled without disabling
+either security layer. When required, Anchor records and enables
+`httpd_can_network_connect` for the TCP PHP-FPM and outbound WordPress paths.
+Redis and Supervisor services remain unavailable on this route.
 
 ---
 
@@ -469,7 +488,7 @@ Anchor/
 ├── config/
 │   ├── domain            # 已验证且已生效的域名（本机生成）
 │   └── domain.pending    # DNS 未就绪的候选域名（本机生成）
-├── lib/                  # 平台、DNS、APT/DNF、systemd 与公共工具
+├── lib/                  # 平台、DNS、APT/DNF/Zypper、systemd 与公共工具
 ├── scripts/
 │   ├── dispatch.sh       # 操作系统检测与路由
 │   ├── check-env.sh      # 可独立运行的公开入口
@@ -479,7 +498,8 @@ Anchor/
 │   ├── common/           # 共享组件实现
 │   ├── ubuntu/           # 已实现的平台路由
 │   ├── debian/           # 已实现的 Debian 13 平台路由
-│   └── centos-stream/    # 已实现的平台路由
+│   ├── centos-stream/    # 已实现的平台路由
+│   └── opensuse-leap/    # 已实现的 openSUSE Leap 16.0 平台路由
 ├── templates/
 ├── tests/
 ├── docs/
@@ -660,6 +680,6 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 ## Status
 
-**M0 integration and hardening / Anchor Installer v0.3.4**
+**M0 integration and hardening / Anchor Installer v0.3.5**
 
 CDSI is under active development and is not yet ready for production use.

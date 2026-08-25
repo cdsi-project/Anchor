@@ -68,6 +68,8 @@ for entry in "${entries[@]}"; do
         || { printf 'FAIL: missing CentOS Stream route for %s\n' "$entry" >&2; exit 1; }
     [[ -f "${TEST_ROOT}/scripts/debian/${entry}" ]] \
         || { printf 'FAIL: missing Debian route for %s\n' "$entry" >&2; exit 1; }
+    [[ -f "${TEST_ROOT}/scripts/opensuse-leap/${entry}" ]] \
+        || { printf 'FAIL: missing openSUSE Leap route for %s\n' "$entry" >&2; exit 1; }
     if ! grep -q 'CDSI_PLATFORM_ROUTE=centos-stream' \
         "${TEST_ROOT}/scripts/centos-stream/${entry}"; then
         printf 'FAIL: CentOS Stream route does not set its platform identity: %s\n' \
@@ -80,18 +82,34 @@ for entry in "${entries[@]}"; do
             "$entry" >&2
         exit 1
     fi
+    if ! grep -q 'CDSI_PLATFORM_ROUTE=opensuse-leap' \
+        "${TEST_ROOT}/scripts/opensuse-leap/${entry}"; then
+        printf 'FAIL: openSUSE Leap route does not set its platform identity: %s\n' \
+            "$entry" >&2
+        exit 1
+    fi
     /bin/sh -n "${TEST_ROOT}/scripts/debian/${entry}" \
         || { printf 'FAIL: Debian route has invalid POSIX shell syntax: %s\n' "$entry" >&2; exit 1; }
+    /bin/sh -n "${TEST_ROOT}/scripts/opensuse-leap/${entry}" \
+        || { printf 'FAIL: openSUSE Leap route has invalid POSIX shell syntax: %s\n' "$entry" >&2; exit 1; }
 done
 
 [[ ! -e "${TEST_ROOT}/scripts/debian/README.md" ]] \
     || { printf 'FAIL: implemented Debian route still has a planned-only README\n' >&2; exit 1; }
 [[ ! -e "${TEST_ROOT}/scripts/centos-stream/README.md" ]] \
     || { printf 'FAIL: implemented CentOS Stream route still has a planned-only README\n' >&2; exit 1; }
+[[ ! -e "${TEST_ROOT}/scripts/opensuse-leap/README.md" ]] \
+    || { printf 'FAIL: implemented openSUSE Leap route still has a planned-only README\n' >&2; exit 1; }
 
 if ! grep -Fq 'if [ "$cdsi_os_name" = "CentOS Stream" ]; then' \
     "${TEST_ROOT}/scripts/dispatch.sh"; then
     printf 'FAIL: CentOS dispatch is not restricted to the explicit CentOS Stream name\n' >&2
+    exit 1
+fi
+
+if ! grep -Fq 'opensuse-leap) cdsi_platform="opensuse-leap"' \
+    "${TEST_ROOT}/scripts/dispatch.sh"; then
+    printf 'FAIL: openSUSE Leap dispatcher route is missing\n' >&2
     exit 1
 fi
 
@@ -124,6 +142,22 @@ for dnf_component in "$nginx_installer" "$certbot_installer"; do
     if ! grep -q 'lib/dnf.sh' "$dnf_component"; then
         printf 'FAIL: DNF-capable component does not load its standalone runtime: %s\n' \
             "$dnf_component" >&2
+        exit 1
+    fi
+done
+
+for zypper_component in \
+    "$nginx_installer" \
+    "${TEST_ROOT}/scripts/common/install-mysql.sh" \
+    "${TEST_ROOT}/scripts/common/install-php.sh" \
+    "${TEST_ROOT}/scripts/common/install-wordpress.sh" \
+    "$certbot_installer" \
+    "${TEST_ROOT}/install.sh" \
+    "${TEST_ROOT}/uninstall.sh" \
+    "${TEST_ROOT}/scripts/configure-domain.sh"; do
+    if ! grep -q 'lib/zypper.sh' "$zypper_component"; then
+        printf 'FAIL: Zypper-capable entry does not load its standalone runtime: %s\n' \
+            "$zypper_component" >&2
         exit 1
     fi
 done
@@ -181,4 +215,4 @@ if ! grep -q -- '-D "$DB_NAME"' \
     exit 1
 fi
 
-printf 'PASS: Ubuntu, Debian, and CentOS Stream platform dispatcher layout\n'
+printf 'PASS: Ubuntu, Debian, CentOS Stream, and openSUSE Leap dispatcher layout\n'

@@ -155,6 +155,9 @@ set_centos_fixture() {
     CDSI_DB_PACKAGE="mysql8.4-server"
     CDSI_DB_SERVICE="mysqld"
     CDSI_DB_FLAVOR="mysql"
+    CDSI_DB_CLIENT="mysql"
+    CDSI_DB_ADMIN_CLIENT="mysqladmin"
+    CDSI_DB_ANCHOR_CONFIG="/etc/my.cnf.d/zz-cdsi-anchor.cnf"
     CDSI_MYSQL_PACKAGE="$CDSI_DB_PACKAGE"
     CDSI_MYSQL_SERVICE="$CDSI_DB_SERVICE"
     CDSI_MYSQL_FLAVOR="$CDSI_DB_FLAVOR"
@@ -173,6 +176,35 @@ set_debian_fixture() {
     CDSI_DB_PACKAGE="mariadb-server"
     CDSI_DB_SERVICE="mariadb"
     CDSI_DB_FLAVOR="mariadb"
+    CDSI_DB_CLIENT="mysql"
+    CDSI_DB_ADMIN_CLIENT="mysqladmin"
+    CDSI_DB_ANCHOR_CONFIG="/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"
+    CDSI_MYSQL_PACKAGE="$CDSI_DB_PACKAGE"
+    CDSI_MYSQL_SERVICE="$CDSI_DB_SERVICE"
+    CDSI_MYSQL_FLAVOR="$CDSI_DB_FLAVOR"
+}
+
+set_opensuse_fixture() {
+    CDSI_PLATFORM_INITIALIZED=1
+    CDSI_PLATFORM="opensuse-leap"
+    CDSI_OS_VERSION="16.0"
+    CDSI_OS_PRETTY="openSUSE Leap 16.0"
+    CDSI_ARCH="x86_64"
+    CDSI_PACKAGE_BACKEND="zypper"
+    CDSI_SERVICE_BACKEND="systemd"
+    CDSI_NGINX_SERVICE="nginx"
+    CDSI_NGINX_SITE_DIR="/etc/nginx/conf.d"
+    CDSI_NGINX_ENABLED_DIR="/etc/nginx/conf.d"
+    CDSI_DB_PACKAGE="mariadb"
+    CDSI_DB_SERVICE="mariadb"
+    CDSI_DB_FLAVOR="mariadb"
+    CDSI_DB_CLIENT="mariadb"
+    CDSI_DB_ADMIN_CLIENT="mariadb-admin"
+    CDSI_DB_ANCHOR_CONFIG="/etc/my.cnf.d/99-cdsi-anchor.cnf"
+    CDSI_PHP_BIN="/usr/bin/php"
+    CDSI_PHP_FPM_BIN="/usr/sbin/php-fpm"
+    CDSI_PHP_FPM_SERVICE="php-fpm"
+    CDSI_PHP_FPM_UPSTREAM="127.0.0.1:9000"
     CDSI_MYSQL_PACKAGE="$CDSI_DB_PACKAGE"
     CDSI_MYSQL_SERVICE="$CDSI_DB_SERVICE"
     CDSI_MYSQL_FLAVOR="$CDSI_DB_FLAVOR"
@@ -181,15 +213,28 @@ set_debian_fixture() {
 set_centos_fixture
 SUDO=()
 
-# DNF removal must receive only installed RPM names matching the requested
+# RPM-backend removal must receive only installed names matching the requested
 # package glob, as an argument array rather than an unexpanded wildcard.
+mock_rpm_packages=(
+    mysql8.4-server
+    mysql8.4-libs
+    mysql-community-server
+    nginx
+    unrelated
+)
 rpm() {
-    printf '%s\n' \
-        mysql8.4-server \
-        mysql8.4-libs \
-        mysql-community-server \
-        nginx \
-        unrelated
+    local package=""
+    case "${1:-}" in
+        -qa)
+            printf '%s\n' "${mock_rpm_packages[@]}"
+            ;;
+        -q)
+            [[ "${2:-}" == "--quiet" ]] || return 2
+            package="${3:-}"
+            [[ " ${mock_rpm_packages[*]} " == *" ${package} "* ]]
+            ;;
+        *) return 2 ;;
+    esac
 }
 cdsi_packages_remove() {
     record_centos_action "packages-remove:$*"
@@ -200,6 +245,14 @@ DRY_RUN=false
 purge_glob 'mysql8.4*' >/dev/null
 assert_centos_action "packages-remove:mysql8.4-server mysql8.4-libs"
 assert_no_centos_action "packages-remove:mysql-community-server"
+
+set_opensuse_fixture
+mock_rpm_packages=(php8-cli php8-gd php7-cli unrelated)
+: > "$centos_action_log"
+purge_glob 'php8-*' >/dev/null
+assert_centos_action "packages-remove:php8-cli php8-gd"
+assert_no_centos_action "packages-remove:php7-cli"
+set_centos_fixture
 
 # Package dry-runs may inspect installed RPMs, but must not invoke removal or
 # autoremove commands.
@@ -266,6 +319,57 @@ if [[ "$debian_mysql_summary" != *"/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"
     exit 1
 fi
 
+# openSUSE removes only its explicit MariaDB server/client packages and the
+# Anchor-owned configuration, never a broad MySQL or MariaDB package family.
+set_opensuse_fixture
+mock_rpm_packages=(mariadb mariadb-client mariadb-tools mariadb-errormessages)
+: > "$centos_action_log"
+uninstall_mysql >/dev/null
+assert_centos_action "drop-database"
+assert_centos_action "stop-disable:mariadb"
+assert_centos_action "packages-remove:mariadb mariadb-client"
+assert_centos_action "remove-path:/etc/my.cnf.d/99-cdsi-anchor.cnf"
+assert_centos_action "remove-path:/var/lib/mysql"
+assert_no_centos_action "packages-remove:mariadb-tools mariadb-errormessages"
+assert_no_centos_action "purge-glob:mariadb*"
+opensuse_mysql_summary="$(comp_what mysql)"
+if [[ "$opensuse_mysql_summary" != *"/etc/my.cnf.d/99-cdsi-anchor.cnf"* ]]; then
+    printf 'FAIL: openSUSE MariaDB confirmation omits the Anchor config file\n' >&2
+    exit 1
+fi
+
+mock_rpm_packages=(
+    php8 php8-cli php8-fpm php8-bcmath php8-ctype php8-curl php8-dom
+    php8-fileinfo php8-gd php8-iconv php8-intl php8-mbstring php8-mysql
+    php8-opcache php8-openssl php8-phar php8-posix php8-redis php8-tokenizer php8-xmlreader
+    php8-xmlwriter php8-zip
+)
+: > "$centos_action_log"
+uninstall_php >/dev/null
+assert_centos_action "stop-disable:php-fpm"
+assert_centos_action \
+    "packages-remove:php8 php8-cli php8-fpm php8-bcmath php8-ctype php8-curl php8-dom php8-fileinfo php8-gd php8-iconv php8-intl php8-mbstring php8-mysql php8-opcache php8-openssl php8-phar php8-posix php8-redis php8-tokenizer php8-xmlreader php8-xmlwriter php8-zip"
+
+_certbot_restore_wordpress_http_url() { return 0; }
+_certbot_cleanup_nginx() { return 0; }
+_certbot_cleanup_ip_tls() { return 0; }
+mock_rpm_packages=(
+    python313-certbot
+    python313-certbot-nginx
+    certbot-systemd-timer
+)
+: > "$centos_action_log"
+uninstall_certbot >/dev/null
+assert_centos_action "stop-disable:certbot.timer"
+assert_centos_action "stop-disable:certbot-renew.timer"
+assert_centos_action \
+    "packages-remove:python313-certbot python313-certbot-nginx certbot-systemd-timer"
+opensuse_certbot_summary="$(comp_what certbot)"
+if [[ "$opensuse_certbot_summary" != *"certbot-systemd-timer"* ]]; then
+    printf 'FAIL: openSUSE Certbot confirmation omits the renewal package\n' >&2
+    exit 1
+fi
+
 : > "$centos_action_log"
 uninstall_redis >/dev/null 2>&1
 uninstall_supervisor >/dev/null 2>&1
@@ -276,7 +380,8 @@ set_centos_fixture
 # bodies under test remain the uninstaller's implementations.
 firewall_marker="${centos_fixture_dir}/firewall-added-services"
 selinux_fcontext_marker="${centos_fixture_dir}/selinux-wordpress-fcontext"
-selinux_boolean_marker="${centos_fixture_dir}/selinux-httpd-db-boolean"
+selinux_boolean_marker="${centos_fixture_dir}/selinux-httpd-network-boolean"
+selinux_legacy_boolean_marker="${centos_fixture_dir}/selinux-httpd-db-boolean"
 epel_marker="${centos_fixture_dir}/epel-added"
 
 # shellcheck disable=SC1090
@@ -286,7 +391,8 @@ source <(declare -f remove_anchor_firewall_services \
 source <(declare -f remove_anchor_selinux_state \
     | sed \
         -e "s|/etc/cdsi/selinux-wordpress-fcontext|${selinux_fcontext_marker}|g" \
-        -e "s|/etc/cdsi/selinux-httpd-db-boolean|${selinux_boolean_marker}|g")
+        -e "s|/etc/cdsi/selinux-httpd-network-boolean|${selinux_boolean_marker}|g" \
+        -e "s|/etc/cdsi/selinux-httpd-db-boolean|${selinux_legacy_boolean_marker}|g")
 # shellcheck disable=SC1090
 source <(declare -f remove_anchor_epel \
     | sed "s|/etc/cdsi/epel-added|${epel_marker}|g")
@@ -317,7 +423,7 @@ cdsi_packages_remove() {
 
 # No marker means no host-security or repository state may be changed.
 rm -f "$firewall_marker" "$selinux_fcontext_marker" \
-    "$selinux_boolean_marker" "$epel_marker"
+    "$selinux_boolean_marker" "$selinux_legacy_boolean_marker" "$epel_marker"
 : > "$centos_action_log"
 DRY_RUN=false
 remove_anchor_firewall_services
@@ -379,11 +485,42 @@ assert_no_destructive_action
     || { printf 'FAIL: invalid SELinux boolean marker was consumed\n' >&2; exit 1; }
 rm -f "$selinux_boolean_marker"
 
+printf 'unexpected_legacy_boolean\n' > "$selinux_legacy_boolean_marker"
+: > "$centos_action_log"
+if remove_anchor_selinux_state >/dev/null 2>&1; then
+    printf 'FAIL: invalid legacy SELinux boolean marker was accepted\n' >&2
+    exit 1
+fi
+assert_no_destructive_action
+[[ -f "$selinux_legacy_boolean_marker" ]] \
+    || { printf 'FAIL: invalid legacy SELinux boolean marker was consumed\n' >&2; exit 1; }
+rm -f "$selinux_legacy_boolean_marker"
+
+# All SELinux markers must be validated before any rollback begins. A damaged
+# legacy marker must not consume otherwise valid current state.
+printf '/var/www/wordpress(/.*)?\n' > "$selinux_fcontext_marker"
+printf 'httpd_can_network_connect\n' > "$selinux_boolean_marker"
+printf 'unexpected_legacy_boolean\n' > "$selinux_legacy_boolean_marker"
+: > "$centos_action_log"
+if remove_anchor_selinux_state >/dev/null 2>&1; then
+    printf 'FAIL: mixed valid/invalid SELinux markers were accepted\n' >&2
+    exit 1
+fi
+assert_no_destructive_action
+for marker in "$selinux_fcontext_marker" "$selinux_boolean_marker" \
+    "$selinux_legacy_boolean_marker"; do
+    [[ -f "$marker" ]] \
+        || { printf 'FAIL: SELinux prevalidation consumed marker: %s\n' "$marker" >&2; exit 1; }
+done
+rm -f "$selinux_fcontext_marker" "$selinux_boolean_marker" \
+    "$selinux_legacy_boolean_marker"
+
 # Marker-backed dry-runs describe work but never invoke destructive commands
 # and never consume the provenance markers.
 printf 'permanent:http\nruntime:https\n' > "$firewall_marker"
 printf '/var/www/wordpress(/.*)?\n' > "$selinux_fcontext_marker"
-printf 'httpd_can_network_connect_db\n' > "$selinux_boolean_marker"
+printf 'httpd_can_network_connect\n' > "$selinux_boolean_marker"
+printf 'httpd_can_network_connect_db\n' > "$selinux_legacy_boolean_marker"
 printf 'epel-release\n' > "$epel_marker"
 : > "$centos_action_log"
 DRY_RUN=true
@@ -392,7 +529,7 @@ remove_anchor_selinux_state >/dev/null
 remove_anchor_epel >/dev/null
 assert_no_destructive_action
 for marker in "$firewall_marker" "$selinux_fcontext_marker" \
-    "$selinux_boolean_marker" "$epel_marker"; do
+    "$selinux_boolean_marker" "$selinux_legacy_boolean_marker" "$epel_marker"; do
     [[ -f "$marker" ]] \
         || { printf 'FAIL: dry-run consumed marker: %s\n' "$marker" >&2; exit 1; }
 done
@@ -437,12 +574,13 @@ assert_centos_action "firewall-cmd:--permanent --remove-service=https"
 assert_centos_action "firewall-cmd:--query-service=https"
 assert_centos_action "firewall-cmd:--remove-service=https"
 assert_centos_action "semanage:fcontext -d /var/www/wordpress(/.*)?"
+assert_centos_action "setsebool:-P httpd_can_network_connect off"
 assert_centos_action "setsebool:-P httpd_can_network_connect_db off"
 assert_centos_action "packages-remove:epel-release"
 for marker in "$firewall_marker" "$selinux_fcontext_marker" \
-    "$selinux_boolean_marker" "$epel_marker"; do
+    "$selinux_boolean_marker" "$selinux_legacy_boolean_marker" "$epel_marker"; do
     [[ ! -e "$marker" ]] \
         || { printf 'FAIL: successful rollback retained marker: %s\n' "$marker" >&2; exit 1; }
 done
 
-printf 'PASS: Ubuntu/Debian/CentOS uninstall guards, scoped config cleanup, dry-run, and marker rollback\n'
+printf 'PASS: Ubuntu/Debian/CentOS/openSUSE uninstall scope, dry-run, and rollback\n'

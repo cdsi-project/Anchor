@@ -28,6 +28,8 @@ source "${CDSI_ROOT}/lib/platform.sh"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=lib/packages.sh
 source "${CDSI_ROOT}/lib/packages.sh"
 # shellcheck source=lib/services.sh
@@ -628,7 +630,7 @@ main() {
     CDSI_CURRENT_STAGE="INIT"
     if ! cdsi_platform_supported; then
         log_error "Unsupported operating system: ${CDSI_OS_PRETTY}."
-        log_info "Anchor supports Ubuntu Server 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
+        log_info "Anchor supports Ubuntu Server 24.04/26.04 LTS, Debian 13, CentOS Stream 10, and openSUSE Leap 16.0."
         exit "$CDSI_COMPONENT_NOT_IMPLEMENTED"
     fi
     logger_init

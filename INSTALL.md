@@ -8,14 +8,14 @@
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Ubuntu Server 24.04/26.04 LTS、Debian 13，或 CentOS Stream 10 |
+| 操作系统 | Ubuntu Server 24.04/26.04 LTS、Debian 13、CentOS Stream 10，或 openSUSE Leap 16.0 |
 | 架构 | `x86_64` 或 `aarch64` |
 | 权限 | root 或 sudo 用户 |
 | CPU | 最低 1 核 |
-| 内存 | 最低 1 GB，推荐 2 GB |
-| 根分区可用空间 | 最低 10 GB，推荐 20 GB |
+| 内存 | 预检警告阈值 1 GB，推荐至少 2 GB |
+| 根分区可用空间 | 预检警告阈值 10 GB，推荐 20 GB |
 | 端口 | 80（HTTP）对公网开放；启用 HTTPS 时还需开放 443 |
-| 最低引导依赖 | systemd、APT 或 DNF、`/bin/sh`、coreutils，以及 curl/wget 之一 |
+| 最低引导依赖 | systemd、APT、DNF 或 Zypper、`/bin/sh`、coreutils，以及 curl/wget 之一 |
 
 **域名（可选但推荐）**：使用指向服务器的裸域名（例如
 `cdsi.example.com`，不要带协议、端口或路径）作为 WordPress 站点 URL，并可
@@ -28,7 +28,12 @@ nginx.org、Ondrej/Sury PHP 等冲突源时会停止并提示先移除，不会�
 MySQL-compatible）、PHP 8.4 和 Certbot 4.0。CentOS 路径不启用 Remi；Certbot 需要
 EPEL，安装器只会从 CentOS
 Extras 安装 `epel-release`，并记录由 Anchor 添加的仓库状态。PHP 图片处理使用
-GD，不安装 Imagick。
+GD，不安装 Imagick。openSUSE 支持范围仅为 Leap 16.0，使用当前配置的系统默认
+Zypper 软件源，不添加 OBS、Packman 或其他第三方仓库；安装 MariaDB 11.8
+（`mariadb`、`mariadb-client`）、PHP 8.4 `php8-*` 包和 Certbot 5.1。
+openSUSE Nginx 站点使用 `/etc/nginx/conf.d`；MariaDB 使用 `mariadb` 服务并保留
+socket root 认证；PHP-FPM 使用 `wwwrun:www`、`127.0.0.1:9000`，并安装
+`php8-openssl`、`php8-opcache`、`php8-redis` 和 `php8-gd` 扩展包。
 
 ---
 
@@ -38,7 +43,7 @@ GD，不安装 Imagick。
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -46,28 +51,28 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 ```bash
 wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh && \
+  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh && \
   sh anchor-bootstrap.sh
 ```
 
 引导脚本会在任何包变更前检查系统、架构、systemd、权限和交互终端，然后：
 
-1. 使用当前配置的系统默认源执行 APT metadata update 或 DNF
-   `makecache --refresh`。
+1. 使用当前配置的系统默认源执行 APT metadata update、DNF
+   `makecache --refresh` 或 `zypper refresh`。
 2. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.4` Anchor
-   发布版到 `/opt/cdsi-anchor`。
+3. 优先从 Gitee、失败后从 GitHub 获取 annotated tag 固定的 `v0.3.5` Anchor
+   发布版到 `/root/cdsi-Anchor`。
 4. 启动 `install.sh` 交互菜单。
 
 这里的“更新源”仅指刷新软件包索引。脚本不会替换镜像地址，不会执行
-`apt upgrade`/`dnf update` 全系统升级，也不会提前启用 EPEL；CentOS 的 EPEL
-仍由 Certbot 安装步骤按需启用并记录。
+`apt upgrade`/`dnf update`/`zypper update` 全系统升级，也不会提前启用 EPEL；
+CentOS 的 EPEL 仍由 Certbot 安装步骤按需启用并记录。
 
 GitHub 引导地址：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.4/bootstrap.sh \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.5/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
@@ -258,8 +263,9 @@ IP HTTPS 不是默认安装行为，并同时要求：
 
 系统 Certbot 不满足能力要求时，命令会失败并保持原有 HTTP 站点。Anchor 使用
 操作系统仓库提供的 Certbot，不额外承诺 CentOS Stream 10 当前 EPEL 包一定支持
-IP 证书。Debian 13 默认源的 Certbot 4.0 支持域名 HTTPS，但不满足 IP 证书要求
-的 5.4+ 能力。Anchor 不会用自签名证书冒充公信 HTTPS。
+IP 证书。Debian 13 默认源的 Certbot 4.0 与 openSUSE Leap 16.0 默认源的
+Certbot 5.1 均支持域名 HTTPS，但不满足 IP 证书要求的 5.4+ 能力。Anchor 不会
+用自签名证书冒充公信 HTTPS。
 
 ### 4.4 备用 ACME CA
 
@@ -308,8 +314,9 @@ sudo bash scripts/configure-https.sh example.com
     Unit               Runtime        Boot
     nginx              active         enabled
     php8.x-fpm/php-fpm active         enabled
-    mysql/mysqld       active         enabled
-    certbot.timer      active         enabled
+    mysql/mysqld/mariadb active       enabled
+    certbot.timer / certbot-renew.timer
+                       active         enabled
 
 ═══ 前台访问检查 ═══
   可访问 OK (HTTP 200)
@@ -336,7 +343,7 @@ Nginx、数据库与 PHP-FPM 只有同时达到 `active` 和 `enabled` 才算完
 
 | 文件 | 内容 |
 |------|------|
-| `password/mysql.pass` | 数据库 root 认证状态 + cdsi 用户密码；Debian 的空 `root:` 表示保留 MariaDB `unix_socket` 认证 |
+| `password/mysql.pass` | 数据库 root 认证状态 + cdsi 用户密码；Debian/openSUSE 的空 `root:` 表示保留 MariaDB `unix_socket` 认证 |
 | `password/redis.pass` | Redis 密码（仅独立安装 Redis 时存在） |
 | `password/wordpress.pass` | WordPress 管理员用户名 + 登录密码 |
 | `password/wordpress-beacon.pass` | CDSI Beacon 用户名 + WordPress Application Password |
@@ -373,8 +380,8 @@ sudo bash scripts/install-supervisor.sh
 `configure-https.sh`，不需要重装 WordPress 或其他基础服务。
 
 跨平台组件的公开脚本会先检测操作系统，再进入平台目录。Ubuntu 24.04/26.04、
-Debian 13 与 CentOS Stream 10 路由均已实现。Redis 与 Supervisor 兼容脚本仍
-仅支持 Ubuntu。
+Debian 13、CentOS Stream 10 与 openSUSE Leap 16.0 路由均已实现。Redis 与
+Supervisor 兼容脚本仍仅支持 Ubuntu。
 
 Ubuntu 和 Debian 安装脚本的 `apt-get` 操作都带有有界重试。遇到系统启动后的
 `unattended-upgrades`、`apt-daily` 等进程占用 DPKG 锁时，单次最多等待
@@ -384,17 +391,22 @@ Ubuntu 和 Debian 安装脚本的 `apt-get` 操作都带有有界重试。遇到
 CentOS 的 DNF 操作同样最多执行 3 次，每次命令限制为 900 秒，失败后间隔
 10 秒重试。脚本不会删除 DNF/RPM 锁，也不会终止系统更新进程。
 
-CentOS 上若 firewalld 正在运行，Nginx 安装会分别补充缺失的永久与运行时
-`http`/`https` 服务规则，并按 `permanent:http`、`runtime:http` 这类分层记录
-Anchor 新增的状态到 `/etc/cdsi/firewall-added-services`。即使永久规则已存在，
-脚本也会补齐缺失的运行时规则；卸载时只回滚 marker 中对应的层。
-SELinux 不会被关闭；启用状态下会为 WordPress 配置持久文件上下文及数据库连接
-布尔值。卸载时只按 Anchor marker 回滚这些变更。
+openSUSE 的 Zypper 操作同样最多执行 3 次，每次命令限制为 900 秒，失败后间隔
+10 秒重试。脚本不会删除 Zypper/RPM 锁，也不会终止系统更新进程。
+
+CentOS 或 openSUSE 上若 firewalld 正在运行，Nginx 安装会分别补充缺失的永久
+与运行时 `http`/`https` 服务规则，并按 `permanent:http`、`runtime:http` 这类
+分层记录 Anchor 新增的状态到 `/etc/cdsi/firewall-added-services`。即使永久
+规则已存在，脚本也会补齐缺失的运行时规则；卸载时只回滚 marker 中对应的层。
+SELinux 不会被关闭；在 CentOS 或 openSUSE 上启用时，会为 WordPress 配置持久
+文件上下文，并按需启用 `httpd_can_network_connect`，保障 TCP PHP-FPM 与 WordPress
+出站连接。卸载时只按 Anchor marker 回滚这些变更，并兼容旧版数据库布尔值记录。
 
 Redis 和 Supervisor 暂不出现在 `install.sh` 的交互菜单和“安装全部”流程中；
 兼容脚本 `scripts/install-redis.sh` 与 `scripts/install-supervisor.sh` 仍保留，
 仅可在受支持 Ubuntu 上按需独立运行。卸载菜单仍保留对应选项，用于清理
-Ubuntu 历史版本或独立安装的服务；Debian 与 CentOS 路径会保护性跳过这两项。
+Ubuntu 历史版本或独立安装的服务；Debian、CentOS 与 openSUSE 路径会保护性
+跳过这两项。
 
 WP-CLI 与 WordPress 安装包优先从国内 CDN 下载。所有来源下载的文件都必须
 匹配仓库中的 `SHA256SUMS` 才会安装或解压；校验失败时会丢弃文件并尝试
@@ -419,7 +431,7 @@ sudo ./uninstall.sh --dry-run mysql
 sudo ./uninstall.sh --yes all
 ```
 
-单项和全量卸载都是破坏性操作。卸载器没有安装来源清单，会按包名和固定路径处理服务器上的全局资源：例如 MySQL/MariaDB 卸载会删除整个 `/var/lib/mysql`；CentOS 上只额外删除 Anchor 自有的 `/etc/my.cnf.d/zz-cdsi-anchor.cnf`，Debian 上只额外删除 `/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf`，不会删除平台的整个数据库配置目录。Certbot 卸载会处理 `/etc/letsencrypt` 中的全部证书，WordPress 卸载会删除全局 `/usr/local/bin/wp`，Nginx/PHP/Redis 也会按包名清理。它只适用于专用 CDSI 测试/节点服务器，不适合同时承载其他网站、数据库或共享运行时的混合服务器。
+单项和全量卸载都是破坏性操作。卸载器没有安装来源清单，会按包名和固定路径处理服务器上的全局资源：例如 MySQL/MariaDB 卸载会删除整个 `/var/lib/mysql`；CentOS 上只额外删除 Anchor 自有的 `/etc/my.cnf.d/zz-cdsi-anchor.cnf`，Debian 上只额外删除 `/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf`，openSUSE 上只额外删除 `/etc/my.cnf.d/99-cdsi-anchor.cnf`，不会删除平台的整个数据库配置目录。Certbot 卸载会处理 `/etc/letsencrypt` 中的全部证书，WordPress 卸载会删除全局 `/usr/local/bin/wp`，Nginx/PHP/Redis 也会按包名清理。它只适用于专用 CDSI 测试/节点服务器，不适合同时承载其他网站、数据库或共享运行时的混合服务器。
 
 先对准备执行的同一目标运行 `--dry-run` 并核对输出；`--yes` 只应在已备份且确认清理范围后使用。卸载会清理所选组件的密码文件，但保留仓库中的 `config/domain`、`config/domain.pending` 和独立配置助手创建的 `/etc/cdsi`，便于审计或重装。全量卸载仅在 `/etc/cdsi/epel-added` 存在且内容有效时删除 Anchor 添加的 EPEL；预先存在的 EPEL 不会被移除。
 
@@ -472,11 +484,12 @@ sudo nginx -t && sudo systemctl reload nginx
 
 使用第 2 节的 `bootstrap.sh` 入口。它会从系统默认源安装 Git 和其他最小引导
 工具，再进入 `install.sh`。完全没有 curl/wget 的系统无法下载远程脚本，需要先
-通过 APT/DNF 安装任一 HTTPS 下载工具。
+通过 APT/DNF/Zypper 安装任一 HTTPS 下载工具。
 
-默认目录是 `/opt/cdsi-anchor`。重复执行时，脚本只会更新由 bootstrap 创建、
-来源为官方 Gitee/GitHub、当前分支正确且工作区干净的仓库，并且只允许
-fast-forward。非 Git 目录、符号链接、未知远端或本地修改都会停止，不会覆盖。
+默认目录是 `/root/cdsi-Anchor`。保存代码前会检查目标路径：同名普通文件、
+非 Git 目录或符号链接都会立即停止且不会覆盖。重复执行时，脚本只会更新由
+bootstrap 创建、来源为官方 Gitee/GitHub、当前分支正确且工作区干净的仓库，
+并且只允许 fast-forward；未知远端或本地修改也会停止。
 
 ### Q: bootstrap 下载或更新失败怎么办？
 
@@ -486,7 +499,7 @@ Git checkout 会先尝试 Gitee、再尝试 GitHub；两者都失败时不会留
 `sh anchor-bootstrap.sh --no-start`，之后通过 SSH 运行：
 
 ```bash
-sudo bash /opt/cdsi-anchor/install.sh
+sudo bash /root/cdsi-Anchor/install.sh
 ```
 
 ### Q: WordPress 后台登录密码在哪？
@@ -533,8 +546,8 @@ sudo bash scripts/configure-https.sh --ip
 它要求系统 Certbot 5.4+，使用有效期约 6 天的 Let's Encrypt short-lived
 证书，并依赖 active/enabled 的自动续期 timer。系统包版本不足、IP 不是公网
 地址或 ACME directory 不可达时，Anchor 保持 HTTP。CentOS Stream 10 的当前
-EPEL Certbot 版本不作支持承诺；Debian 13 默认 Certbot 4.0 明确不满足 IP 证书
-能力要求，但仍支持域名 HTTPS。
+EPEL Certbot 版本不作支持承诺；Debian 13 默认 Certbot 4.0 与 openSUSE Leap
+16.0 默认 Certbot 5.1 明确不满足 IP 证书能力要求，但仍支持域名 HTTPS。
 
 ### Q: 如何修改数据库 root 认证？
 
@@ -549,10 +562,11 @@ sudo chmod 600 password/mysql.pass
 
 上面的 `sed` 只更新 `root:` 行，会保留同一文件中的 `cdsi:` 应用凭据。若密码包含会被 `sed` 解释的字符，请手动编辑该行并再次确认文件权限为 600。
 
-Debian 13 的 MariaDB root 认证由系统默认的 `unix_socket` 提供，使用
-`sudo mariadb` 管理；Anchor 不生成 root 密码，`password/mysql.pass` 中的空
-`root:` 行用于标记该认证状态。不要执行上面的改密命令，否则会破坏安装器和
-卸载器依赖的 socket 认证契约。应用程序始终使用文件中的 `cdsi:` 密码连接。
+Debian 13 与 openSUSE Leap 16.0 的 MariaDB root 认证由系统默认的
+`unix_socket` 提供，使用 `sudo mariadb` 管理；Anchor 不生成 root 密码，
+`password/mysql.pass` 中的空 `root:` 行用于标记该认证状态。不要执行上面的
+改密命令，否则会破坏安装器和卸载器依赖的 socket 认证契约。应用程序始终使用
+文件中的 `cdsi:` 密码连接。
 
 ---
 
@@ -584,16 +598,18 @@ Anchor/
 │   ├── ubuntu/                   # 已实现的平台路由
 │   ├── debian/                   # 已实现的 Debian 13 平台路由
 │   ├── centos-stream/            # 已实现的平台路由
+│   ├── opensuse-leap/            # 已实现的 openSUSE Leap 16.0 平台路由
 │   ├── configure.sh              # 可独立运行，尚未接入主安装流程
 │   └── health.sh                 # 未来 doctor 的占位实现
 ├── lib/
 │   ├── apt.sh                    # apt-get 锁等待与有界重试
 │   ├── dnf.sh                    # DNF 超时与有界重试
+│   ├── zypper.sh                 # Zypper 超时与有界重试
 │   ├── bootstrap.sh              # POSIX 入口转入 Bash 实现
 │   ├── common.sh                 # 颜色、常量、工具函数
 │   ├── domain.sh                 # A/AAAA 校验与 active/pending 状态
 │   ├── logger.sh                 # 日志
-│   ├── packages.sh               # APT/DNF 软件包操作与 EPEL 边界
+│   ├── packages.sh               # APT/DNF/Zypper 软件包操作与 EPEL 边界
 │   ├── platform.sh               # 系统检测与平台支持矩阵
 │   ├── services.sh               # systemd 服务操作
 │   ├── system.sh                 # 系统工具

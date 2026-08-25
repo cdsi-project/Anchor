@@ -7,6 +7,7 @@ cdsi_packages_update() {
     case "$CDSI_PACKAGE_BACKEND" in
         apt) cdsi_apt_get update -qq ;;
         dnf) cdsi_dnf makecache -q --refresh ;;
+        zypper) cdsi_zypper refresh ;;
         *) return 1 ;;
     esac
 }
@@ -17,6 +18,7 @@ cdsi_packages_install() {
     case "$CDSI_PACKAGE_BACKEND" in
         apt) cdsi_apt_get install -y -qq "$@" ;;
         dnf) cdsi_dnf install -y -q "$@" ;;
+        zypper) cdsi_zypper install --no-recommends "$@" ;;
         *) return 1 ;;
     esac
 }
@@ -36,6 +38,11 @@ cdsi_package_available() {
                 || cdsi_dnf_query -q list --available "$package" \
                     >/dev/null 2>&1
             ;;
+        zypper)
+            rpm -q --quiet "$package" >/dev/null 2>&1 \
+                || LC_ALL=C cdsi_zypper_query search --match-exact \
+                    --type package "$package" >/dev/null 2>&1
+            ;;
         *)
             return 1
             ;;
@@ -53,6 +60,9 @@ cdsi_package_installed() {
         dnf)
             rpm -q --quiet "$package" >/dev/null 2>&1
             ;;
+        zypper)
+            rpm -q --quiet "$package" >/dev/null 2>&1
+            ;;
         *)
             return 1
             ;;
@@ -65,6 +75,7 @@ cdsi_packages_remove() {
     case "$CDSI_PACKAGE_BACKEND" in
         apt) cdsi_apt_get purge -y "$@" ;;
         dnf) cdsi_dnf remove -y -q "$@" ;;
+        zypper) cdsi_zypper remove "$@" ;;
         *) return 1 ;;
     esac
 }
@@ -74,6 +85,7 @@ cdsi_packages_autoremove() {
     case "$CDSI_PACKAGE_BACKEND" in
         apt) cdsi_apt_get autoremove --purge -y ;;
         dnf) cdsi_dnf autoremove -y -q ;;
+        zypper) return 0 ;;
         *) return 1 ;;
     esac
 }

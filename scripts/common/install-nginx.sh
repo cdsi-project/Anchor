@@ -29,6 +29,8 @@ CDSI_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=../../lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=../../lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=../../lib/platform.sh
 source "${CDSI_ROOT}/lib/platform.sh"
 # shellcheck source=../../lib/packages.sh
@@ -46,7 +48,7 @@ fi
 
 cdsi_platform_init
 if ! cdsi_platform_supported; then
-    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
+    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS, Debian 13, CentOS Stream 10, and openSUSE Leap 16.0."
 fi
 
 resolve_nginx_bin() {
@@ -82,6 +84,9 @@ if cdsi_is_apt_family; then
             fail "Third-party Nginx source detected in ${source_file}. Remove it before continuing."
         fi
     done
+fi
+if cdsi_is_opensuse_leap; then
+    command -v zypper >/dev/null 2>&1 || fail "zypper is required."
 fi
 
 # Build the nginx.conf update without relying on in-place sed behavior.
@@ -364,8 +369,8 @@ _ensure_firewall_scope() {
     log "Recorded Anchor-added firewalld layer: ${scope}:${service_name}."
 }
 
-_configure_centos_firewall() {
-    cdsi_is_centos_stream || return 0
+_configure_managed_firewall() {
+    cdsi_uses_firewalld || return 0
     systemctl is-active --quiet firewalld 2>/dev/null || return 0
     command -v firewall-cmd >/dev/null 2>&1 \
         || { warn "firewalld is active, but firewall-cmd is unavailable."; return 1; }
@@ -392,7 +397,7 @@ if [[ -n "$NGINX_BIN" ]] && cdsi_service_active "$CDSI_NGINX_SERVICE"; then
         cdsi_service_enabled "$CDSI_NGINX_SERVICE" \
             || fail "${CDSI_NGINX_SERVICE} is not enabled at boot."
         _apply_tuning || fail "Could not safely apply Nginx global tuning."
-        _configure_centos_firewall \
+        _configure_managed_firewall \
             || fail "Could not safely configure firewalld for Nginx."
         log "Nginx is already installed, its configuration is valid, and the service is running."
         log "Skipping installation."
@@ -445,7 +450,7 @@ else
     fail "${CDSI_NGINX_SERVICE} is not running."
 fi
 
-_configure_centos_firewall \
+_configure_managed_firewall \
     || fail "Could not safely configure firewalld for Nginx."
 
 if _port_is_listening 80; then

@@ -17,10 +17,10 @@ CDSI_BOOTSTRAP_PACKAGE_TIMEOUT="${CDSI_BOOTSTRAP_PACKAGE_TIMEOUT:-900}"
 CDSI_BOOTSTRAP_GIT_TIMEOUT="${CDSI_BOOTSTRAP_GIT_TIMEOUT:-300}"
 CDSI_BOOTSTRAP_GITEE_REPOSITORY="https://gitee.com/cdsi/anchor.git"
 CDSI_BOOTSTRAP_GITHUB_REPOSITORY="https://github.com/cdsi-project/Anchor.git"
-CDSI_BOOTSTRAP_REF="v0.3.4"
+CDSI_BOOTSTRAP_REF="v0.3.5"
 CDSI_BOOTSTRAP_BRANCH="anchor-bootstrap"
 CDSI_BOOTSTRAP_CANDIDATE_REF="refs/cdsi-anchor/bootstrap-candidate"
-CDSI_BOOTSTRAP_DIR="${CDSI_ANCHOR_DIR:-/opt/cdsi-anchor}"
+CDSI_BOOTSTRAP_DIR="${CDSI_ANCHOR_DIR:-/root/cdsi-Anchor}"
 CDSI_BOOTSTRAP_START_INSTALLER=true
 CDSI_BOOTSTRAP_TEMP_DIR=""
 CDSI_BOOTSTRAP_TEMP_PARENT=""
@@ -51,7 +51,7 @@ bootstrap_usage() {
 Usage: sh bootstrap.sh [options]
 
 Options:
-  --dir PATH    Install or update Anchor in PATH (default: /opt/cdsi-anchor)
+  --dir PATH    Install or update Anchor in PATH (default: /root/cdsi-Anchor)
   --no-start    Prepare the checkout without starting install.sh
   -h, --help    Show this help
 EOF
@@ -141,6 +141,21 @@ bootstrap_validate_settings() {
     fi
 }
 
+bootstrap_check_target_path() {
+    if [ ! -e "$CDSI_BOOTSTRAP_DIR" ] && [ ! -L "$CDSI_BOOTSTRAP_DIR" ]; then
+        return 0
+    fi
+    [ ! -L "$CDSI_BOOTSTRAP_DIR" ] \
+        || bootstrap_fail \
+            "A symbolic link already exists at the Anchor path; it was not changed: ${CDSI_BOOTSTRAP_DIR}"
+    [ -d "$CDSI_BOOTSTRAP_DIR" ] \
+        || bootstrap_fail \
+            "A file already exists at the Anchor path; it was not overwritten: ${CDSI_BOOTSTRAP_DIR}"
+    [ -d "$CDSI_BOOTSTRAP_DIR/.git" ] \
+        || bootstrap_fail \
+            "A non-Git directory already exists at the Anchor path; it was not overwritten: ${CDSI_BOOTSTRAP_DIR}"
+}
+
 bootstrap_has_tty() {
     if bootstrap_stdin_is_tty; then
         return 0
@@ -176,6 +191,9 @@ bootstrap_detect_platform() {
             ;;
         debian:13)
             CDSI_BOOTSTRAP_PLATFORM="apt"
+            ;;
+        opensuse-leap:16.0)
+            CDSI_BOOTSTRAP_PLATFORM="zypper"
             ;;
         centos:10)
             case "${NAME:-}" in
@@ -244,6 +262,15 @@ bootstrap_dnf() {
     timeout --foreground "$CDSI_BOOTSTRAP_PACKAGE_TIMEOUT" dnf "$@"
 }
 
+bootstrap_zypper_available() {
+    command -v zypper >/dev/null 2>&1
+}
+
+bootstrap_zypper() {
+    timeout --foreground "$CDSI_BOOTSTRAP_PACKAGE_TIMEOUT" \
+        zypper --non-interactive "$@"
+}
+
 bootstrap_prepare_apt() {
     bootstrap_apt_available \
         || bootstrap_fail "apt-get is required on ${CDSI_BOOTSTRAP_OS}."
@@ -273,10 +300,23 @@ bootstrap_prepare_dnf() {
         || bootstrap_fail "Could not install the Anchor bootstrap tools."
 }
 
+bootstrap_prepare_zypper() {
+    bootstrap_zypper_available \
+        || bootstrap_fail "zypper is required on openSUSE Leap."
+    bootstrap_log "Refreshing the configured Zypper repository metadata..."
+    bootstrap_retry bootstrap_zypper refresh \
+        || bootstrap_fail "zypper refresh failed."
+    bootstrap_log "Installing the Anchor bootstrap tools from the configured openSUSE repositories..."
+    bootstrap_retry bootstrap_zypper install --no-recommends \
+        bash ca-certificates coreutils curl git \
+        || bootstrap_fail "Could not install the Anchor bootstrap tools."
+}
+
 bootstrap_prepare_packages() {
     case "$CDSI_BOOTSTRAP_PLATFORM" in
         apt) bootstrap_prepare_apt ;;
         dnf) bootstrap_prepare_dnf ;;
+        zypper) bootstrap_prepare_zypper ;;
         *) bootstrap_fail "Bootstrap package backend is not initialized." ;;
     esac
     command -v bash >/dev/null 2>&1 \
@@ -570,6 +610,7 @@ bootstrap_main() {
     bootstrap_validate_settings
     bootstrap_detect_platform
     bootstrap_preflight
+    bootstrap_check_target_path
     bootstrap_log \
         "Preparing Anchor on ${CDSI_BOOTSTRAP_OS} ${CDSI_BOOTSTRAP_OS_VERSION} (${CDSI_BOOTSTRAP_ARCH})..."
     bootstrap_prepare_packages

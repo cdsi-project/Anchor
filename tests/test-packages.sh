@@ -39,9 +39,12 @@ assert_failure() {
 last_apt_args=""
 last_dnf_args=""
 last_dnf_query=""
+last_zypper_args=""
+last_zypper_query=""
 mock_candidate="1.0"
 mock_installed=true
 mock_dnf_available=true
+mock_zypper_available=true
 mock_extras_repo="extras-common"
 epel_test_dir="$(mktemp -d)"
 CDSI_EPEL_MARKER="${epel_test_dir}/epel-added"
@@ -65,6 +68,15 @@ cdsi_dnf_query() {
         return
     fi
     [[ "$mock_dnf_available" == true ]]
+}
+
+cdsi_zypper() {
+    last_zypper_args="$*"
+}
+
+cdsi_zypper_query() {
+    last_zypper_query="$*"
+    [[ "$mock_zypper_available" == true ]]
 }
 
 sudo() {
@@ -149,7 +161,48 @@ mock_installed=false
 assert_failure "missing RPM should be rejected" \
     cdsi_package_installed missing
 
+CDSI_PACKAGE_BACKEND="zypper"
+assert_success "Zypper metadata update should succeed" cdsi_packages_update
+assert_equal "refresh" "$last_zypper_args" \
+    "Zypper metadata arguments"
+
+assert_success "Zypper install should succeed" \
+    cdsi_packages_install nginx php8-fpm
+assert_equal "install --no-recommends nginx php8-fpm" "$last_zypper_args" \
+    "Zypper install arguments"
+
+assert_success "Zypper remove should succeed" cdsi_packages_remove nginx
+assert_equal "remove nginx" "$last_zypper_args" \
+    "Zypper remove arguments"
+
+last_zypper_args=""
+assert_success "Zypper autoremove should safely skip" cdsi_packages_autoremove
+assert_equal "" "$last_zypper_args" \
+    "Zypper autoremove must not invoke a broad cleanup"
+
+mock_installed=false
+mock_zypper_available=true
+assert_success "available Zypper package should be detected" \
+    cdsi_package_available php8-gd
+assert_equal "search --match-exact --type package php8-gd" \
+    "$last_zypper_query" "Zypper availability query"
+mock_zypper_available=false
+assert_failure "missing Zypper package should be rejected" \
+    cdsi_package_available missing
+mock_installed=true
+last_zypper_query=""
+assert_success "installed RPM should remain available on Zypper" \
+    cdsi_package_available nginx
+assert_equal "" "$last_zypper_query" \
+    "installed Zypper package must bypass the repository query"
+assert_success "installed Zypper RPM should be detected" \
+    cdsi_package_installed nginx
+mock_installed=false
+assert_failure "missing Zypper RPM should be rejected" \
+    cdsi_package_installed missing
+
 CDSI_PLATFORM="centos-stream"
+CDSI_PACKAGE_BACKEND="dnf"
 mock_installed=true
 last_dnf_args=""
 rm -f -- "$CDSI_EPEL_MARKER"
@@ -204,4 +257,4 @@ CDSI_PACKAGE_BACKEND="apt"
 assert_failure "empty install unexpectedly succeeded" cdsi_packages_install
 assert_failure "empty purge unexpectedly succeeded" cdsi_packages_remove
 
-printf 'PASS: APT/DNF package operations and explicit EPEL enablement\n'
+printf 'PASS: APT/DNF/Zypper package operations and explicit EPEL enablement\n'

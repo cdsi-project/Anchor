@@ -24,7 +24,7 @@ fi
 #   • Certbot package: skips if already installed.
 #   • Certificate:     skips issuance if a live cert for the domain
 #                      already exists under the Certbot config dir.
-#   • Auto-renewal:    enables and verifies certbot.timer.
+#   • Auto-renewal:    enables and verifies certbot.timer or certbot-renew.timer.
 #
 # Can be called by install.sh or run directly:
 #   bash scripts/install-certbot.sh
@@ -54,6 +54,8 @@ source "${CDSI_ROOT}/lib/platform.sh"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=../../lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=../../lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=../../lib/packages.sh
 source "${CDSI_ROOT}/lib/packages.sh"
 # shellcheck source=../../lib/services.sh
@@ -64,7 +66,7 @@ source "${CDSI_ROOT}/lib/wordpress-access.sh"
 source "${CDSI_ROOT}/lib/domain.sh"
 cdsi_platform_init
 cdsi_platform_supported \
-    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
+    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, CentOS Stream 10, and openSUSE Leap 16.0."
 
 # ── Root Check ─────────────────────────────────────────────
 if [[ "${EUID}" -eq 0 ]]; then
@@ -106,6 +108,46 @@ prepare_certbot_repository() {
     fi
 }
 
+certbot_packages() {
+    if cdsi_is_opensuse_leap; then
+        printf '%s\n' python313-certbot python313-certbot-nginx \
+            certbot-systemd-timer
+    else
+        printf '%s\n' certbot python3-certbot-nginx
+    fi
+}
+
+certbot_nginx_package() {
+    if cdsi_is_opensuse_leap; then
+        printf '%s\n' python313-certbot-nginx
+    else
+        printf '%s\n' python3-certbot-nginx
+    fi
+}
+
+certbot_timer_package() {
+    if cdsi_is_opensuse_leap; then
+        printf '%s\n' certbot-systemd-timer
+    fi
+}
+
+ensure_certbot_timer_package() {
+    local timer_package=""
+    timer_package="$(certbot_timer_package)"
+    [[ -n "$timer_package" ]] || return 0
+    if cdsi_package_installed "$timer_package"; then
+        return 0
+    fi
+
+    log "Installing the Certbot renewal timer package..."
+    cdsi_packages_update \
+        || log "Package metadata update failed; continuing with cached metadata..."
+    cdsi_packages_install "$timer_package" \
+        || fail "Package installation failed for ${timer_package}."
+    cdsi_package_installed "$timer_package" \
+        || fail "${timer_package} was not installed; certificate configuration was not started."
+}
+
 ensure_certbot_renewal_timer() {
     RENEWAL_SUMMARY="manual: ${CERTBOT_BIN} renew"
     RENEWAL_TIMER=""
@@ -134,7 +176,7 @@ ensure_certbot_renewal_timer() {
 if resolve_certbot_bin; then
     log "Certbot is already installed: $("${CERTBOT_BIN}" --version 2>&1)"
 else
-    CERTBOT_PACKAGES=(certbot python3-certbot-nginx)
+    mapfile -t CERTBOT_PACKAGES < <(certbot_packages)
     prepare_certbot_repository
     if cdsi_is_centos_stream; then
         log "Installing Certbot + Nginx plugin from EPEL..."
@@ -149,9 +191,13 @@ else
     log_ok "Certbot installed: $("${CERTBOT_BIN}" --version 2>&1)"
 fi
 
+# Leap packages the renewal timer separately. Reconcile it even when Certbot
+# was already present, before any certificate or Nginx state can be changed.
+ensure_certbot_timer_package
+
 # Ensure the Nginx plugin is present (needed for --nginx auto-config).
 if ! ${SUDO} "${CERTBOT_BIN}" plugins 2>/dev/null | grep -q "nginx"; then
-    CERTBOT_NGINX_PACKAGE="python3-certbot-nginx"
+    CERTBOT_NGINX_PACKAGE="$(certbot_nginx_package)"
     prepare_certbot_repository
     log "Installing the Certbot Nginx plugin..."
     cdsi_packages_install "${CERTBOT_NGINX_PACKAGE}" \
@@ -527,8 +573,10 @@ if [[ "$IP_MODE" == true ]]; then
         || fail "Publicly trusted IP certificates require a public IPv4 address."
     [[ ! -s "$DOMAIN_FILE" ]] \
         || fail "An active domain exists. Run configure-domain.sh --clear before explicitly enabling IP HTTPS."
-    certbot_supports_ip_certificates \
-        || fail "The system Certbot does not support IP certificates (requires Certbot 5.4+ with --ip-address). HTTP was not changed."
+    if ! certbot_supports_ip_certificates; then
+        log_fail "The system Certbot does not support IP certificates (requires Certbot 5.4+ with --ip-address). HTTPS was deferred and HTTP was not changed."
+        exit 10
+    fi
     CERT_NAME="$SERVER_IP"
     TARGET_LABEL="$SERVER_IP"
     IDENTIFIERS=("$SERVER_IP")

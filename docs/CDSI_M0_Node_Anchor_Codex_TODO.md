@@ -3,16 +3,18 @@
 > **CDSI — Creator Digital Sovereignty Infrastructure**  
 > 本文档用于指导 Codex 实现 CDSI 的第一个工程里程碑：**从一台裸 Ubuntu Server 自动化部署出一个 HTTPS 可访问的 CDSI Node**。
 
-> **文档状态（2026-08-22）：历史设计与进度记录。** 本文保留最初的
+> **文档状态（2026-08-24）：历史设计与进度记录。** 本文保留最初的
 > Installer v0.1 目标、示例路径和未勾选清单，不代表当前实现状态。
 > 当前事实以根目录 [README](../README.md)、[INSTALL](../INSTALL.md) 和
-> [AGENTS](../AGENTS.md) 为准；当前入口是 `sudo ./install.sh`。
+> [AGENTS](../AGENTS.md) 为准；当前入口是 `sudo ./install.sh`。下方 v0.1
+> 主体中的 Ubuntu-only、Redis、Supervisor 与 CDSI Core 表述均为历史设计，
+> 不应解读为当前支持矩阵或默认安装流程。
 
-当前 M0 / Installer v0.3.4 进度：
+当前 M0 / Installer v0.3.5 进度：
 
 | 状态 | 内容 |
 | --- | --- |
-| 已实现 | Ubuntu 24.04/26.04、Debian 13 与 CentOS Stream 10 路由、日志与预检、Nginx、MySQL/MariaDB、PHP-FPM、WordPress、最后可跳过的域名/Certbot/HTTPS 步骤、组件级幂等、最终访问信息、Beacon Application Password、卸载、APT/DNF 重试、CDN SHA-256 校验；Debian 13 使用默认源 MariaDB 11.8、PHP 8.4 和 Certbot 4.0 |
+| 已实现 | Ubuntu 24.04/26.04、Debian 13、CentOS Stream 10 与 openSUSE Leap 16.0 路由、日志与预检、Nginx、MySQL/MariaDB、PHP-FPM、WordPress、最后可跳过的域名/Certbot/HTTPS 步骤、组件级幂等、最终访问信息、Beacon Application Password、卸载、APT/DNF/Zypper 重试、CDN SHA-256 校验；Debian 13 使用默认源 MariaDB 11.8、PHP 8.4 和 Certbot 4.0；openSUSE Leap 16.0 使用默认 Zypper 源、MariaDB 11.8、PHP 8.4 和仅支持域名 HTTPS 的 Certbot 5.1 |
 | 独立可用 | Redis、Supervisor（仅 Ubuntu）；不进入主菜单和“安装全部” |
 | 部分实现 | `/etc/cdsi` 配置助手、整机集成验收、持久日志与故障恢复 |
 | 未实现 | Composer/CDSI Core 部署、`cdsi` CLI/doctor/update、断点续装、完整服务器备份恢复、队列 Worker |
@@ -1484,7 +1486,7 @@ Codex 实现时遵循以下规则：
 # 31. 历史里程碑说明
 
 本文最初要求只实现 Installer Skeleton、Logger、Preflight 和 Error
-Handling；该里程碑已经完成，Nginx、PHP-FPM、MySQL 和 WordPress 基础主流程，
+Handling；该里程碑已经完成，Nginx、PHP-FPM、MySQL/MariaDB 和 WordPress 基础主流程，
 以及可选的 Certbot/域名/HTTPS 最终步骤也已实现。不得再依据旧清单禁止这些组件或从不存在的
 旧版设想中的目录结构重新搭建工程。
 

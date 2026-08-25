@@ -6,7 +6,7 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 服务器基础设施安装工具，它把一台受支持的服务器配置为可访问的 OpenWeb(WordPress)
 节点。
 
-> 当前状态：M0 集成与加固，Installer v0.3.4。
+> 当前状态：M0 集成与加固，Installer v0.3.5。
 
 ## 当前实现
 
@@ -29,22 +29,23 @@ CDSI Anchor 是 CDSI（Creator Digital Sovereignty Infrastructure）的
 | PHP-FPM | `scripts/install-php.sh` | 默认安装 |
 | WordPress | `scripts/install-wordpress.sh` | 默认安装 |
 | Certbot | `scripts/install-certbot.sh` | 可选最后一步，也可独立安装 |
-| Redis | `scripts/install-redis.sh` | 需要时可单独安装 |
-| Supervisor | `scripts/install-supervisor.sh` | 需要时可单独安装 |
+| Redis | `scripts/install-redis.sh` | 仅 Ubuntu，需要时可单独安装 |
+| Supervisor | `scripts/install-supervisor.sh` | 仅 Ubuntu，需要时可单独安装 |
 
 ## 安装
 
-支持 Ubuntu Server 24.04/26.04 LTS、Debian 13 和 CentOS Stream 10。主安装器
-需要 root/sudo 权限和交互式终端。新服务器无需预装 Git，国内服务器可使用：
+支持 Ubuntu Server 24.04/26.04 LTS、Debian 13、CentOS Stream 10 和
+openSUSE Leap 16.0。主安装器需要 root/sudo 权限和交互式终端。新服务器无需
+预装 Git，国内服务器可使用：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.4/bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh \
   -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
 ```
 
 根目录 `bootstrap.sh` 会刷新系统默认源的元数据，安装 Git、Bash、curl、CA
-证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.4` 发布标签，
+证书和 coreutils，优先从 Gitee、失败后从 GitHub 获取 `v0.3.5` 发布标签，
 然后进入 `install.sh`。它不会改写软件源或执行全系统升级。
 
 已有 Git 时也可手动克隆：
@@ -57,11 +58,20 @@ sudo ./install.sh
 
 `install.sh` 是统一入口。`scripts/` 中的脚本也可独立运行
 
-公开组件脚本会检测操作系统并进入对应平台目录。Ubuntu、Debian 13 与 CentOS
-Stream 10 路由均已实现；Redis 与 Supervisor 独立脚本仍仅支持 Ubuntu。
+公开组件脚本会检测操作系统并进入对应平台目录。Ubuntu、Debian 13、CentOS
+Stream 10 与 openSUSE Leap 16.0 路由均已实现；Redis 与 Supervisor 独立脚本
+仍仅支持 Ubuntu。
 
 Debian 13 直接从系统默认源安装 MariaDB 11.8（`mariadb-server`，
 MySQL-compatible），以及 PHP 8.4 和 Certbot 4.0。
+
+openSUSE 支持范围仅为 Leap 16.0。该路线只使用系统默认 Zypper 源：Nginx 站点
+位于 `/etc/nginx/conf.d`，MariaDB 11.8 使用 `mariadb`/`mariadb-client` 包、
+`mariadb` 服务和 socket root 认证，PHP 8.4 使用 `php8-*` 包以及
+`php8-openssl`、`php8-opcache`、`php8-redis`、`php8-gd` 扩展包，并遵循
+`wwwrun:www` 和 `127.0.0.1:9000` 的 PHP-FPM 契约。
+firewalld 与 SELinux 仅在启用时处理，不会被关闭；脚本会按需记录并启用
+`httpd_can_network_connect`，保障 TCP PHP-FPM 与 WordPress 出站连接。
 
 完整菜单、域名/SSL 配置、凭据位置、卸载风险和排错步骤见
 [INSTALL.md](INSTALL.md)。
@@ -82,7 +92,8 @@ sudo bash scripts/configure-https.sh --ip
 IP 公信 HTTPS 需要公网 IPv4、系统 Certbot 5.4+ 和 Let's Encrypt
 `shortlived` profile；能力不足时保持 HTTP。Anchor 不承诺 CentOS Stream 10
 当前 EPEL Certbot 一定支持 IP 证书。Debian 13 的默认 Certbot 4.0 支持域名
-HTTPS，但不满足 IP 证书能力要求。
+HTTPS，但不满足 IP 证书能力要求；openSUSE Leap 16.0 的默认 Certbot 5.1 也
+只支持域名 HTTPS，IP HTTPS 会安全延期并保留 HTTP。
 
 可通过 `CDSI_ACME_FALLBACK_SERVER` 指定备用 CA，但只在主 ACME directory
 网络不可达时使用。DNS、CAA、授权、证书校验和限额错误不会自动切换；ZeroSSL
@@ -116,8 +127,8 @@ Anchor 当前负责基础设施和 WordPress OpenWeb 节点的安装，不负责
 
 WordPress 自身提供文章管理、RSS 和 REST API；
 
-Anchor 可以运行在提供受支持 Ubuntu Server、Debian 或 CentOS Stream 的
-云服务器或自有主机上，但项目
+Anchor 可以运行在提供受支持 Ubuntu Server、Debian、CentOS Stream 或
+openSUSE Leap 16.0 的云服务器或自有主机上，但项目
 当前按操作系统版本验证安装路径，不对阿里云、腾讯云、AWS 等厂商分别作兼容
 认证，也不会调用云厂商专有 API。
 
@@ -146,7 +157,8 @@ M0 接下来聚焦：
 ## 设计原则
 
 - 基础栈使用系统默认软件源；CentOS 仅为 Certbot 显式启用 EPEL，不引入
-  Remi。PHP 图片处理使用 GD，不安装 Imagick。
+  Remi；openSUSE 不添加第三方 Zypper 仓库。PHP 图片处理使用 GD，不安装
+  Imagick。
 - 安装脚本默认幂等，不重置已有凭据或覆盖用户数据。
 - 域名解析未确认、IP 证书能力不足或证书签发失败时保留可用的 HTTP 站点。
 - Nginx、MySQL/MariaDB、PHP-FPM 和已配置证书的续期 timer 都验证运行与

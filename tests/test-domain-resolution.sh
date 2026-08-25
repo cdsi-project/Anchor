@@ -33,7 +33,9 @@ grep -Fq 'cdsi_packages_install dnsutils' "$DOMAIN_LIB" \
 grep -Fq 'debian) cdsi_packages_install bind9-dnsutils' "$DOMAIN_LIB" \
     || fail_test "Debian DNS validation does not install dig from the system source"
 grep -Fq 'cdsi_packages_install bind-utils' "$DOMAIN_LIB" \
-    || fail_test "CentOS DNS validation does not install dig from the system source"
+    || fail_test "RPM-family DNS validation does not install dig from the system source"
+grep -Fq 'opensuse-leap) cdsi_packages_install bind-utils' "$DOMAIN_LIB" \
+    || fail_test "openSUSE DNS validation does not install dig from the system source"
 if grep -Fq 'getent ahost' "$DOMAIN_LIB"; then
     fail_test "DNS activation must not trust NSS or /etc/hosts through getent"
 fi

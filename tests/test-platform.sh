@@ -71,6 +71,7 @@ reset_platform() {
         CDSI_NGINX_CONF_DIR CDSI_NGINX_MAIN_CONF CDSI_NGINX_SITE_DIR \
         CDSI_NGINX_ENABLED_DIR CDSI_NGINX_LOG_DIR \
         CDSI_DB_PACKAGE CDSI_DB_SERVICE CDSI_DB_FLAVOR \
+        CDSI_DB_CLIENT CDSI_DB_ADMIN_CLIENT CDSI_DB_ANCHOR_CONFIG \
         CDSI_MYSQL_PACKAGE CDSI_MYSQL_SERVICE CDSI_MYSQL_FLAVOR \
         CDSI_CERTBOT_CONFIG_DIR CDSI_PHP_VERSION \
         CDSI_PHP_PACKAGE_PREFIX CDSI_PHP_BIN CDSI_PHP_FPM_BIN \
@@ -97,6 +98,9 @@ assert_equal "apt" "$CDSI_PACKAGE_BACKEND" "Ubuntu package backend"
 assert_equal "systemd" "$CDSI_SERVICE_BACKEND" "Ubuntu service backend"
 assert_equal "/etc/nginx/sites-available" "$CDSI_NGINX_SITE_DIR" \
     "Ubuntu Nginx site path"
+assert_equal "mysql" "$CDSI_DB_CLIENT" "Ubuntu database client"
+assert_equal "mysqladmin" "$CDSI_DB_ADMIN_CLIENT" \
+    "Ubuntu database admin client"
 assert_equal "php8.3-fpm" "$(cdsi_php_service_name 8.3)" \
     "Ubuntu PHP-FPM service"
 assert_equal "unix:/run/php/php8.3-fpm.sock" \
@@ -142,6 +146,9 @@ assert_equal "mariadb-server" "$CDSI_DB_PACKAGE" \
     "Debian database package"
 assert_equal "mariadb" "$CDSI_DB_SERVICE" "Debian database service"
 assert_equal "mariadb" "$CDSI_DB_FLAVOR" "Debian database flavor"
+assert_equal "mysql" "$CDSI_DB_CLIENT" "Debian database client"
+assert_equal "mysqladmin" "$CDSI_DB_ADMIN_CLIENT" \
+    "Debian database admin client"
 assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
     "Debian database package compatibility alias"
 assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
@@ -208,6 +215,9 @@ assert_equal "mysql8.4-server" "$CDSI_DB_PACKAGE" \
     "CentOS database package"
 assert_equal "mysqld" "$CDSI_DB_SERVICE" "CentOS database service"
 assert_equal "mysql" "$CDSI_DB_FLAVOR" "CentOS database flavor"
+assert_equal "mysql" "$CDSI_DB_CLIENT" "CentOS database client"
+assert_equal "mysqladmin" "$CDSI_DB_ADMIN_CLIENT" \
+    "CentOS database admin client"
 assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
     "database package compatibility alias"
 assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
@@ -222,6 +232,7 @@ assert_equal "/usr/bin/php" "$CDSI_PHP_BIN" "CentOS PHP binary"
 assert_equal "/usr/sbin/php-fpm" "$CDSI_PHP_FPM_BIN" \
     "CentOS PHP-FPM binary"
 assert_success "CentOS Stream helper should match" cdsi_is_centos_stream
+assert_success "CentOS Stream should use SELinux integration" cdsi_uses_selinux
 assert_failure "CentOS Stream should not match the APT-family helper" \
     cdsi_is_apt_family
 assert_success "CentOS Stream 10 x86_64 should be supported" \
@@ -269,6 +280,105 @@ cdsi_platform_init
 assert_failure "CentOS Stream unsupported architecture should be rejected" \
     cdsi_platform_supported
 
+mock_kernel="Linux"
+mock_arch="x86_64"
+mock_os_id="opensuse-leap"
+mock_os_version="16.0"
+mock_os_name="openSUSE Leap"
+mock_os_pretty="openSUSE Leap 16.0"
+reset_platform
+cdsi_platform_init
+assert_equal "opensuse-leap" "$CDSI_PLATFORM" \
+    "openSUSE Leap platform detection"
+assert_equal "zypper" "$CDSI_PACKAGE_BACKEND" \
+    "openSUSE Leap package backend"
+assert_equal "systemd" "$CDSI_SERVICE_BACKEND" \
+    "openSUSE Leap service backend"
+assert_equal "wwwrun" "$CDSI_WEB_USER" "openSUSE Leap web user"
+assert_equal "www" "$CDSI_WEB_GROUP" "openSUSE Leap web group"
+assert_equal "/etc/nginx/conf.d" "$CDSI_NGINX_SITE_DIR" \
+    "openSUSE Leap Nginx site path"
+assert_equal "$CDSI_NGINX_SITE_DIR" "$CDSI_NGINX_ENABLED_DIR" \
+    "openSUSE Leap Nginx enabled path"
+assert_equal "mariadb" "$CDSI_DB_PACKAGE" \
+    "openSUSE Leap database package"
+assert_equal "mariadb" "$CDSI_DB_SERVICE" \
+    "openSUSE Leap database service"
+assert_equal "mariadb" "$CDSI_DB_FLAVOR" \
+    "openSUSE Leap database flavor"
+assert_equal "mariadb" "$CDSI_DB_CLIENT" \
+    "openSUSE Leap database client"
+assert_equal "mariadb-admin" "$CDSI_DB_ADMIN_CLIENT" \
+    "openSUSE Leap database admin client"
+assert_equal "/etc/my.cnf.d/99-cdsi-anchor.cnf" \
+    "$CDSI_DB_ANCHOR_CONFIG" \
+    "openSUSE Leap Anchor database configuration"
+assert_equal "8.4" "$CDSI_PHP_VERSION" \
+    "openSUSE Leap expected PHP version"
+assert_equal "php8" "$CDSI_PHP_PACKAGE_PREFIX" \
+    "openSUSE Leap PHP package prefix"
+assert_equal "/usr/bin/php" "$CDSI_PHP_BIN" \
+    "openSUSE Leap PHP binary"
+assert_equal "/usr/sbin/php-fpm" "$CDSI_PHP_FPM_BIN" \
+    "openSUSE Leap PHP-FPM binary"
+assert_equal "php-fpm" "$(cdsi_php_service_name 8.4)" \
+    "openSUSE Leap PHP-FPM service"
+assert_equal "127.0.0.1:9000" "$(cdsi_php_fpm_upstream 8.4)" \
+    "openSUSE Leap PHP-FPM upstream"
+assert_success "openSUSE Leap helper should match" cdsi_is_opensuse_leap
+assert_success "openSUSE Leap should use managed firewalld rules" \
+    cdsi_uses_firewalld
+assert_success "openSUSE Leap should use SELinux integration" \
+    cdsi_uses_selinux
+assert_failure "openSUSE Leap should not match the APT-family helper" \
+    cdsi_is_apt_family
+assert_success "openSUSE Leap 16.0 x86_64 should be supported" \
+    cdsi_platform_supported
+CDSI_PLATFORM_ROUTE="opensuse-leap"
+assert_success "matching openSUSE Leap route should be accepted" \
+    cdsi_platform_supported
+CDSI_PLATFORM_ROUTE="opensuse"
+assert_failure "non-canonical openSUSE route should be rejected" \
+    cdsi_platform_supported
+
+mock_arch="aarch64"
+reset_platform
+cdsi_platform_init
+assert_success "openSUSE Leap 16.0 aarch64 should be supported" \
+    cdsi_platform_supported
+
+mock_arch="x86_64"
+mock_os_version="15.6"
+reset_platform
+cdsi_platform_init
+assert_failure "openSUSE Leap 15.6 should be rejected" cdsi_platform_supported
+
+mock_os_version="16.1"
+mock_os_pretty="openSUSE Leap 16.1"
+reset_platform
+cdsi_platform_init
+assert_failure "openSUSE Leap 16.1 should be rejected" cdsi_platform_supported
+
+mock_os_id="opensuse-tumbleweed"
+mock_os_version="20260822"
+mock_os_name="openSUSE Tumbleweed"
+mock_os_pretty="openSUSE Tumbleweed"
+reset_platform
+cdsi_platform_init
+assert_equal "opensuse-tumbleweed" "$CDSI_PLATFORM" \
+    "openSUSE Tumbleweed must retain a distinct identity"
+assert_failure "openSUSE Tumbleweed should be rejected" cdsi_platform_supported
+
+mock_os_id="opensuse-microos"
+mock_os_version="20260822"
+mock_os_name="openSUSE MicroOS"
+mock_os_pretty="openSUSE MicroOS"
+reset_platform
+cdsi_platform_init
+assert_equal "opensuse-microos" "$CDSI_PLATFORM" \
+    "openSUSE MicroOS must retain a distinct identity"
+assert_failure "openSUSE MicroOS should be rejected" cdsi_platform_supported
+
 mock_kernel="Darwin"
 mock_arch="arm64"
 reset_platform
@@ -290,4 +400,4 @@ for unsupported_arch in i386 amd64 arm64 riscv64 powerpc64; do
         cdsi_arch_supported
 done
 
-printf 'PASS: platform detection, supported releases, paths, and architectures\n'
+printf 'PASS: Ubuntu, Debian, CentOS Stream, and openSUSE Leap platform contracts\n'

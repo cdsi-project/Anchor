@@ -26,6 +26,8 @@ CDSI_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=../../lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=../../lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=../../lib/platform.sh
 source "${CDSI_ROOT}/lib/platform.sh"
 # shellcheck source=../../lib/packages.sh
@@ -36,7 +38,7 @@ source "${CDSI_ROOT}/lib/services.sh"
 resolve_php_bin() {
     local candidate=""
 
-    if cdsi_is_centos_stream \
+    if { cdsi_is_centos_stream || cdsi_is_opensuse_leap; } \
        && [[ -n "${CDSI_PHP_BIN:-}" && -x "$CDSI_PHP_BIN" ]]; then
         printf '%s\n' "$CDSI_PHP_BIN"
         return 0
@@ -48,7 +50,7 @@ resolve_php_bin() {
         return 0
     fi
 
-    for candidate in /usr/bin/php; do
+    for candidate in /usr/bin/php /usr/bin/php8; do
         if [[ -x "$candidate" ]]; then
             printf '%s\n' "$candidate"
             return 0
@@ -61,11 +63,12 @@ resolve_fpm_bin() {
     local version="$1"
     local candidate=""
 
-    if cdsi_is_centos_stream; then
+    if cdsi_is_centos_stream || cdsi_is_opensuse_leap; then
         for candidate in \
             "${CDSI_PHP_FPM_BIN:-}" \
             "$(command -v php-fpm 2>/dev/null || true)" \
-            /usr/sbin/php-fpm; do
+            /usr/sbin/php-fpm \
+            /usr/sbin/php-fpm8; do
             if [[ -n "$candidate" && -x "$candidate" ]]; then
                 printf '%s\n' "$candidate"
                 return 0
@@ -85,6 +88,76 @@ resolve_fpm_bin() {
     return 1
 }
 
+php_fpm_upstream_ready() {
+    local upstream="${1:-}"
+    local socket_path="" host="" port="" proc_address="" port_hex=""
+    local ipv4_a="" ipv4_b="" ipv4_c="" ipv4_d=""
+    local proc_file=""
+    local -a proc_files=()
+
+    if [[ "$upstream" == unix:* ]]; then
+        socket_path="${upstream#unix:}"
+        [[ "$socket_path" == /* && -S "$socket_path" ]]
+        return
+    fi
+
+    if [[ "$upstream" =~ ^([A-Za-z0-9._-]+):([0-9]{1,5})$ ]]; then
+        host="${BASH_REMATCH[1]}"
+        port="${BASH_REMATCH[2]}"
+    else
+        return 2
+    fi
+    ((10#$port >= 1 && 10#$port <= 65535)) || return 2
+
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnH 2>/dev/null \
+            | awk -v expected="${host}:${port}" -v port="$port" '
+                $4 ~ (":" port "$") {
+                    if ($4 == expected) {
+                        found=1
+                    } else {
+                        unsafe=1
+                    }
+                }
+                END { exit found && !unsafe ? 0 : 1 }
+            '
+        return
+    fi
+
+    # /proc exposes the exact local bind address without requiring iproute2.
+    # Linux stores IPv4 bytes in little-endian order in /proc/net/tcp.
+    if [[ "$host" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+        ipv4_a="${BASH_REMATCH[1]}"
+        ipv4_b="${BASH_REMATCH[2]}"
+        ipv4_c="${BASH_REMATCH[3]}"
+        ipv4_d="${BASH_REMATCH[4]}"
+        local octet=""
+        for octet in "$ipv4_a" "$ipv4_b" "$ipv4_c" "$ipv4_d"; do
+            ((10#$octet <= 255)) || return 2
+        done
+        printf -v proc_address '%02X%02X%02X%02X' \
+            "$((10#$ipv4_d))" "$((10#$ipv4_c))" \
+            "$((10#$ipv4_b))" "$((10#$ipv4_a))"
+    else
+        return 127
+    fi
+    printf -v port_hex '%04X' "$((10#$port))"
+    for proc_file in /proc/net/tcp /proc/net/tcp6; do
+        [[ -r "$proc_file" ]] && proc_files+=("$proc_file")
+    done
+    ((${#proc_files[@]} > 0)) || return 127
+    awk -v expected="${proc_address}:${port_hex}" -v port_hex="$port_hex" '
+        toupper($4) == "0A" && toupper($2) ~ (":" port_hex "$") {
+            if (toupper($2) == expected) {
+                found=1
+            } else {
+                unsafe=1
+            }
+        }
+        END { exit found && !unsafe ? 0 : 1 }
+    ' "${proc_files[@]}"
+}
+
 php_extension_loaded() {
     local extension="$1"
     PHP_EXTENSION_NAME="$extension" "$PHP_BIN" \
@@ -95,6 +168,7 @@ required_php_extensions_loaded() {
     local extension=""
     local -a extensions=(
         curl
+        ctype
         dom
         fileinfo
         filter
@@ -102,6 +176,7 @@ required_php_extensions_loaded() {
         iconv
         mbstring
         mysqli
+        openssl
         "Zend OPcache"
         Phar
         posix
@@ -118,6 +193,12 @@ required_php_extensions_loaded() {
     for extension in "${extensions[@]}"; do
         php_extension_loaded "$extension" || return 1
     done
+}
+
+php_expected_version() {
+    local detected_version="${1:-}"
+    cdsi_platform_init
+    printf '%s\n' "${CDSI_PHP_VERSION:-$detected_version}"
 }
 
 install_php_extension() {
@@ -195,6 +276,27 @@ php_base_packages() {
                 php-mysqlnd \
                 php-process
             ;;
+        opensuse-leap)
+            printf '%s\n' \
+                php8-cli \
+                php8-fpm \
+                php8-bcmath \
+                php8-ctype \
+                php8-curl \
+                php8-dom \
+                php8-fileinfo \
+                php8-iconv \
+                php8-intl \
+                php8-mbstring \
+                php8-mysql \
+                php8-openssl \
+                php8-phar \
+                php8-posix \
+                php8-tokenizer \
+                php8-xmlreader \
+                php8-xmlwriter \
+                php8-zip
+            ;;
         *)
             return 1
             ;;
@@ -217,6 +319,11 @@ install_required_php_extensions() {
             install_php_extension redis true php-pecl-redis6
             install_php_extension gd true php-gd
             install_php_extension zip true php-pecl-zip
+            ;;
+        opensuse-leap)
+            install_php_extension "Zend OPcache" true php8-opcache
+            install_php_extension redis true php8-redis
+            install_php_extension gd true php8-gd
             ;;
         *)
             return 1
@@ -241,8 +348,13 @@ resolve_installed_php_runtime() {
         return 0
     fi
 
-    cdsi_is_centos_stream || return 1
-    FPM_PACKAGE="php-fpm"
+    if cdsi_is_centos_stream; then
+        FPM_PACKAGE="php-fpm"
+    elif cdsi_is_opensuse_leap; then
+        FPM_PACKAGE="php8-fpm"
+    else
+        return 1
+    fi
     PHP_BIN="$(resolve_php_bin || true)"
     [[ -n "$PHP_BIN" && -x "$PHP_BIN" ]] \
         || fail "The system PHP binary was not installed."
@@ -268,7 +380,7 @@ fi
 
 cdsi_platform_init
 if ! cdsi_platform_supported; then
-    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS, Debian 13, or CentOS Stream 10."
+    fail "Unsupported operating system: ${CDSI_OS_PRETTY}. Supported: Ubuntu 24.04/26.04 LTS, Debian 13, CentOS Stream 10, or openSUSE Leap 16.0."
 fi
 
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required."
@@ -289,6 +401,8 @@ if cdsi_is_apt_family; then
     done
 elif cdsi_is_centos_stream; then
     command -v dnf >/dev/null 2>&1 || fail "dnf is required."
+elif cdsi_is_opensuse_leap; then
+    command -v zypper >/dev/null 2>&1 || fail "zypper is required."
 fi
 
 # Skip only if the expected runtime, all required extensions, and PHP-FPM are
@@ -299,13 +413,18 @@ if [[ -n "$PHP_BIN" ]]; then
     current_version="$("$PHP_BIN" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || true)"
     current_fpm_service="$(cdsi_php_service_name "$current_version")"
     current_fpm_bin="$(resolve_fpm_bin "$current_version" || true)"
-    expected_version="$current_version"
+    current_fpm_upstream="$(cdsi_php_fpm_upstream "$current_version" || true)"
+    expected_version="$(php_expected_version "$current_version")"
 
     if [[ -n "$current_version" && "$current_version" == "$expected_version" \
           && -n "$current_fpm_bin" \
           && -n "$current_fpm_service" ]] \
        && cdsi_service_active "$current_fpm_service" \
        && required_php_extensions_loaded; then
+        [[ -n "$current_fpm_upstream" ]] \
+            || fail "Could not determine the PHP-FPM upstream."
+        php_fpm_upstream_ready "$current_fpm_upstream" \
+            || fail "PHP-FPM is not listening on the expected upstream ${current_fpm_upstream}. Existing FPM configuration was not changed."
         cdsi_service_enable_now "$current_fpm_service" \
             || fail "Could not enable ${current_fpm_service} at boot."
         log "PHP ${current_version} (PHP-FPM and required extensions) is already installed and running."
@@ -333,13 +452,18 @@ fi
 
 resolve_installed_php_runtime
 
+EXPECTED_PHP_VERSION="$(php_expected_version "$PHP_VERSION")"
+if [[ -n "$EXPECTED_PHP_VERSION" && "$PHP_VERSION" != "$EXPECTED_PHP_VERSION" ]]; then
+    fail "Expected the system repository PHP ${EXPECTED_PHP_VERSION}, but resolved PHP ${PHP_VERSION}."
+fi
+
 [[ -n "$PHP_BIN" && -x "$PHP_BIN" ]] || fail "PHP ${PHP_VERSION} binary was not installed."
 
 install_required_php_extensions "$PHP_VERSION"
 
 if ! required_php_extensions_loaded; then
     missing_extensions=()
-    for required_extension in curl dom fileinfo filter gd iconv mbstring mysqli "Zend OPcache" Phar posix redis session SimpleXML tokenizer xml xmlreader xmlwriter zip; do
+    for required_extension in curl ctype dom fileinfo filter gd iconv mbstring mysqli openssl "Zend OPcache" Phar posix redis session SimpleXML tokenizer xml xmlreader xmlwriter zip; do
         if ! php_extension_loaded "$required_extension"; then
             missing_extensions+=("$required_extension")
         fi
@@ -394,19 +518,8 @@ fi
 FPM_UPSTREAM="$(cdsi_php_fpm_upstream "$PHP_VERSION")"
 [[ -n "$FPM_UPSTREAM" ]] || fail "Could not determine the PHP-FPM upstream."
 
-if [[ "$FPM_UPSTREAM" == unix:* ]]; then
-    FPM_SOCKET="${FPM_UPSTREAM#unix:}"
-    [[ -S "$FPM_SOCKET" ]] || fail "Expected PHP-FPM socket ${FPM_SOCKET} was not found."
-else
-    FPM_HOST="${FPM_UPSTREAM%:*}"
-    FPM_PORT="${FPM_UPSTREAM##*:}"
-    if command -v nc >/dev/null 2>&1; then
-        nc -z "$FPM_HOST" "$FPM_PORT" >/dev/null 2>&1 \
-            || fail "PHP-FPM is not listening on ${FPM_UPSTREAM}."
-    else
-        warn "nc is unavailable; skipped PHP-FPM listener verification."
-    fi
-fi
+php_fpm_upstream_ready "$FPM_UPSTREAM" \
+    || fail "PHP-FPM is not listening on the expected upstream ${FPM_UPSTREAM}."
 
 log "PHP-FPM upstream: ${FPM_UPSTREAM}"
 log "PHP installation completed."

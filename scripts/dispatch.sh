@@ -29,6 +29,7 @@ case "$cdsi_kernel" in
         case "$cdsi_os_id" in
             ubuntu) cdsi_platform="ubuntu" ;;
             debian) cdsi_platform="debian" ;;
+            opensuse-leap) cdsi_platform="opensuse-leap" ;;
             centos)
                 if [ "$cdsi_os_name" = "CentOS Stream" ]; then
                     cdsi_platform="centos-stream"

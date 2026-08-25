@@ -23,7 +23,7 @@ for helper in \
     _firewall_scope_add \
     _firewall_scope_remove \
     _ensure_firewall_scope \
-    _configure_centos_firewall; do
+    _configure_managed_firewall; do
     # shellcheck disable=SC1090
     source <(extract_function "$helper")
 done
@@ -31,7 +31,11 @@ done
 ROOT_CMD=()
 log() { :; }
 warn() { :; }
-cdsi_is_centos_stream() { return 0; }
+platform_fixture="centos-stream"
+cdsi_uses_firewalld() {
+    [[ "$platform_fixture" == "centos-stream" \
+        || "$platform_fixture" == "opensuse-leap" ]]
+}
 systemctl() { [[ "$*" == "is-active --quiet firewalld" ]]; }
 
 declare -A permanent_state=( [http]=1 [https]=1 )
@@ -86,7 +90,7 @@ marker="${fixture_dir}/firewall-added-services"
 
 # A pre-existing permanent rule must not make the installer skip a missing
 # runtime rule. Only the runtime layer is Anchor-owned and recorded.
-_configure_centos_firewall
+_configure_managed_firewall
 assert_action "permanent:query:http"
 assert_action "runtime:query:http"
 assert_action "runtime:add:http"
@@ -99,7 +103,7 @@ rm -f "$marker"
 : > "$action_log"
 permanent_state[http]=0
 runtime_state[http]=0
-_configure_centos_firewall
+_configure_managed_firewall
 assert_action "permanent:add:http"
 assert_action "runtime:add:http"
 expected_marker=$'permanent:http\nruntime:http'
@@ -108,7 +112,7 @@ expected_marker=$'permanent:http\nruntime:http'
 
 # A rerun observes both rules and performs no duplicate mutation.
 : > "$action_log"
-_configure_centos_firewall
+_configure_managed_firewall
 if grep -Fq ':add:' "$action_log"; then
     printf 'FAIL: Nginx firewalld rerun duplicated an existing rule\n' >&2
     exit 1
@@ -122,7 +126,7 @@ permanent_state[http]=1
 runtime_state[http]=1
 permanent_state[https]=1
 runtime_state[https]=0
-if _configure_centos_firewall; then
+if _configure_managed_firewall; then
     printf 'FAIL: invalid firewalld ownership marker was accepted\n' >&2
     exit 1
 fi
@@ -134,10 +138,32 @@ assert_no_action "permanent:remove:https"
 [[ "$(cat "$marker")" == "http" ]] \
     || { printf 'FAIL: invalid firewalld marker was unexpectedly rewritten\n' >&2; exit 1; }
 
+# openSUSE Leap uses the same provenance-tracked firewalld integration.
+rm -f "$marker"
+: > "$action_log"
+platform_fixture="opensuse-leap"
+permanent_state[http]=1
+runtime_state[http]=1
+permanent_state[https]=0
+runtime_state[https]=0
+_configure_managed_firewall
+assert_action "permanent:add:https"
+assert_action "runtime:add:https"
+expected_marker=$'permanent:https\nruntime:https'
+[[ "$(cat "$marker")" == "$expected_marker" ]] \
+    || { printf 'FAIL: openSUSE firewalld ownership was not recorded\n' >&2; exit 1; }
+
+# Platforms outside the managed firewalld set must not be inspected or changed.
+: > "$action_log"
+platform_fixture="ubuntu"
+_configure_managed_firewall
+[[ ! -s "$action_log" ]] \
+    || { printf 'FAIL: non-firewalld platform changed firewall state\n' >&2; exit 1; }
+
 # The healthy-running fast path must also reconcile boot enablement.
 fast_path="$(sed -n '/# Skip only when/,/# Preserve a broken existing configuration/p' "$NGINX_SCRIPT")"
 [[ "$fast_path" == *'cdsi_service_enabled "$CDSI_NGINX_SERVICE"'* \
    && "$fast_path" == *'cdsi_service_enable "$CDSI_NGINX_SERVICE"'* ]] \
     || { printf 'FAIL: Nginx fast path does not ensure boot enablement\n' >&2; exit 1; }
 
-printf 'PASS: Nginx fast-path enablement and scoped firewalld ownership\n'
+printf 'PASS: Nginx fast-path enablement and CentOS/openSUSE firewalld ownership\n'

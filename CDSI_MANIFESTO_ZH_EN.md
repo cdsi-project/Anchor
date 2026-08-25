@@ -499,13 +499,13 @@ CDSI 从基础设施开始。
 目标：
 
 ```text
-一台干净 Ubuntu Server
+一台干净的受支持 Linux 服务器
         ↓
 CDSI Anchor
         ↓
 Nginx
 PHP-FPM
-MySQL
+MySQL/MariaDB
 WordPress OpenWeb
 Beacon Application Password
 可选最终步骤：域名与 HTTPS
@@ -513,9 +513,10 @@ Beacon Application Password
 CDSI Node
 ```
 
-当前 Anchor Installer v0.3.4 已实现四项基础组件与可选最终 Certbot/HTTPS
-流程。域名步骤可以按 Enter 跳过；Redis 与 Supervisor 脚本仍可独立运行，但
-暂不属于默认安装；CDSI Core、`cdsi` CLI/doctor 和完整服务器恢复仍是后续工作。
+当前 Anchor Installer v0.3.5 已实现四项基础组件与可选最终 Certbot/HTTPS
+流程。域名步骤可以按 Enter 跳过；Redis 与 Supervisor 脚本仍仅可在 Ubuntu
+上独立运行，且不属于默认安装；CDSI Core、`cdsi` CLI/doctor 和完整服务器恢复
+仍是后续工作。
 
 基础设施可以复杂。
 
@@ -1120,13 +1121,13 @@ The first engineering milestone is therefore:
 The goal:
 
 ```text
-Clean Ubuntu Server
+Clean supported Linux server
         ↓
 CDSI Anchor
         ↓
 Nginx
 PHP-FPM
-MySQL
+MySQL/MariaDB
 WordPress OpenWeb
 Beacon Application Password
 Optional final step: domain and HTTPS
@@ -1134,10 +1135,10 @@ Optional final step: domain and HTTPS
 CDSI Node
 ```
 
-Anchor Installer v0.3.4 implements the four-component base path plus optional
+Anchor Installer v0.3.5 implements the four-component base path plus optional
 final Certbot/HTTPS setup. The domain step can be skipped with Enter. Redis and
-Supervisor remain independently runnable scripts but are not part of the
-default installation. CDSI Core, the `cdsi` CLI/doctor, and complete server
+Supervisor remain independently runnable on Ubuntu only and are not part of
+the default installation. CDSI Core, the `cdsi` CLI/doctor, and complete server
 recovery remain future work.
 
 Infrastructure complexity should exist underneath.

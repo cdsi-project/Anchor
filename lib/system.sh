@@ -25,6 +25,7 @@ get_os_name() {
         ubuntu) printf 'Ubuntu\n' ;;
         debian) printf 'Debian\n' ;;
         centos-stream) printf 'CentOS Stream\n' ;;
+        opensuse-leap) printf 'openSUSE Leap\n' ;;
         *) printf '%s\n' "${CDSI_PLATFORM:-unknown}" ;;
     esac
 }
@@ -133,11 +134,16 @@ check_dnf() {
     check_command dnf
 }
 
+check_zypper() {
+    check_command zypper
+}
+
 check_package_manager() {
     cdsi_platform_init
     case "$CDSI_PACKAGE_BACKEND" in
         apt) check_command apt-get ;;
         dnf) check_command dnf ;;
+        zypper) check_command zypper ;;
         *) return 1 ;;
     esac
 }

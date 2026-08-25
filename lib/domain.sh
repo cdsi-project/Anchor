@@ -21,6 +21,7 @@ cdsi_ensure_dns_tools() {
         ubuntu) cdsi_packages_install dnsutils ;;
         debian) cdsi_packages_install bind9-dnsutils ;;
         centos-stream) cdsi_packages_install bind-utils ;;
+        opensuse-leap) cdsi_packages_install bind-utils ;;
         *) return 1 ;;
     esac
     command -v dig >/dev/null 2>&1

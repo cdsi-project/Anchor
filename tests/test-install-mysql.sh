@@ -85,6 +85,7 @@ reset_platform() {
         CDSI_NGINX_CONF_DIR CDSI_NGINX_MAIN_CONF CDSI_NGINX_SITE_DIR \
         CDSI_NGINX_ENABLED_DIR CDSI_NGINX_LOG_DIR \
         CDSI_DB_PACKAGE CDSI_DB_SERVICE CDSI_DB_FLAVOR \
+        CDSI_DB_CLIENT CDSI_DB_ADMIN_CLIENT CDSI_DB_ANCHOR_CONFIG \
         CDSI_MYSQL_PACKAGE CDSI_MYSQL_SERVICE CDSI_MYSQL_FLAVOR \
         CDSI_CERTBOT_CONFIG_DIR CDSI_PHP_VERSION CDSI_PHP_PACKAGE_PREFIX \
         CDSI_PHP_BIN CDSI_PHP_FPM_BIN CDSI_PHP_FPM_SERVICE \
@@ -106,6 +107,9 @@ assert_equal "apt" "$CDSI_PACKAGE_BACKEND" "Ubuntu package backend"
 assert_equal "mysql-server" "$CDSI_DB_PACKAGE" "Ubuntu database package"
 assert_equal "mysql" "$CDSI_DB_SERVICE" "Ubuntu database service"
 assert_equal "mysql" "$CDSI_DB_FLAVOR" "Ubuntu database flavor"
+assert_equal "mysql" "$CDSI_DB_CLIENT" "Ubuntu database client"
+assert_equal "mysqladmin" "$CDSI_DB_ADMIN_CLIENT" \
+    "Ubuntu database admin client"
 assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
     "Ubuntu package compatibility alias"
 assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
@@ -118,6 +122,9 @@ assert_equal "mariadb-server" "$CDSI_DB_PACKAGE" \
     "Debian MariaDB package"
 assert_equal "mariadb" "$CDSI_DB_SERVICE" "Debian MariaDB service"
 assert_equal "mariadb" "$CDSI_DB_FLAVOR" "Debian database flavor"
+assert_equal "mysql" "$CDSI_DB_CLIENT" "Debian database client"
+assert_equal "mysqladmin" "$CDSI_DB_ADMIN_CLIENT" \
+    "Debian database admin client"
 assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
     "Debian package compatibility alias"
 assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
@@ -130,19 +137,49 @@ assert_equal "mysql8.4-server" "$CDSI_DB_PACKAGE" \
     "CentOS MySQL 8.4 package"
 assert_equal "mysqld" "$CDSI_DB_SERVICE" "CentOS MySQL service"
 assert_equal "mysql" "$CDSI_DB_FLAVOR" "CentOS database flavor"
+assert_equal "mysql" "$CDSI_DB_CLIENT" "CentOS database client"
+assert_equal "mysqladmin" "$CDSI_DB_ADMIN_CLIENT" \
+    "CentOS database admin client"
 assert_equal "$CDSI_DB_PACKAGE" "$CDSI_MYSQL_PACKAGE" \
     "CentOS package compatibility alias"
 assert_equal "$CDSI_DB_SERVICE" "$CDSI_MYSQL_SERVICE" \
     "CentOS service compatibility alias"
 
+init_platform_fixture opensuse-leap 16.0 "openSUSE Leap" \
+    "openSUSE Leap 16.0"
+assert_equal "opensuse-leap" "$CDSI_PLATFORM" "openSUSE Leap platform"
+assert_equal "zypper" "$CDSI_PACKAGE_BACKEND" \
+    "openSUSE Leap package backend"
+assert_equal "mariadb" "$CDSI_DB_PACKAGE" \
+    "openSUSE Leap MariaDB package"
+assert_equal "mariadb" "$CDSI_DB_SERVICE" \
+    "openSUSE Leap MariaDB service"
+assert_equal "mariadb" "$CDSI_DB_FLAVOR" \
+    "openSUSE Leap database flavor"
+assert_equal "mariadb" "$CDSI_DB_CLIENT" \
+    "openSUSE Leap database client"
+assert_equal "mariadb-admin" "$CDSI_DB_ADMIN_CLIENT" \
+    "openSUSE Leap database admin client"
+assert_equal "/etc/my.cnf.d/99-cdsi-anchor.cnf" \
+    "$CDSI_DB_ANCHOR_CONFIG" \
+    "openSUSE Leap Anchor database configuration"
+
 [[ -f "$MYSQL_INSTALLER" ]] || fail_test "missing MySQL installer"
 
 assert_contains 'source "${CDSI_ROOT}/lib/dnf.sh"' \
     "MySQL installer does not load its standalone DNF runtime"
-assert_contains 'MYSQL_PACKAGE="${CDSI_DB_PACKAGE}"' \
-    "MySQL installer does not use the platform package mapping"
+assert_contains 'source "${CDSI_ROOT}/lib/zypper.sh"' \
+    "database installer does not load its standalone Zypper runtime"
+assert_contains 'DB_PACKAGES=("${CDSI_DB_PACKAGE}")' \
+    "database installer does not use the platform package mapping"
+assert_contains 'DB_PACKAGES+=(mariadb-client)' \
+    "openSUSE database install does not include the client package"
 assert_contains 'cdsi_service_installed "${CDSI_MYSQL_SERVICE}"' \
     "MySQL installer does not use the platform service mapping"
+assert_contains 'DB_CLIENT="$CDSI_DB_CLIENT"' \
+    "database installer does not use the platform client mapping"
+assert_contains 'DB_ADMIN_CLIENT="$CDSI_DB_ADMIN_CLIENT"' \
+    "database installer does not use the platform admin-client mapping"
 
 assert_contains 'if cdsi_is_centos_stream && cdsi_package_installed mariadb-server; then' \
     "CentOS MySQL installer lacks the MariaDB conflict guard"
@@ -152,11 +189,11 @@ assert_count 1 'mariadb-server' \
     "MariaDB must appear only in the protective conflict guard"
 assert_before \
     'if cdsi_is_centos_stream && cdsi_package_installed mariadb-server; then' \
-    'MYSQL_PACKAGE="${CDSI_DB_PACKAGE}"' \
+    'DB_PACKAGES=("${CDSI_DB_PACKAGE}")' \
     "MariaDB conflict guard must run before MySQL package installation"
 
-assert_contains 'local config_file="/etc/my.cnf.d/zz-cdsi-anchor.cnf"' \
-    "CentOS MySQL local-bind config path is missing"
+assert_count 2 'local config_file="$CDSI_DB_ANCHOR_CONFIG"' \
+    "database local-bind paths must use the platform mapping"
 assert_contains 'bind-address=127.0.0.1' \
     "MySQL TCP listener is not restricted to localhost"
 assert_contains 'mysqlx-bind-address=127.0.0.1' \
@@ -165,8 +202,8 @@ assert_contains '${SUDO} mysqld --validate-config' \
     "MySQL local-bind config is not validated before use"
 assert_contains '${SUDO} rm -f -- "$config_file"' \
     "invalid MySQL local-bind config is not rolled back"
-assert_contains 'local config_file="/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"' \
-    "Debian MariaDB local-bind config path is missing"
+assert_contains 'if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then' \
+    "MariaDB local-bind configuration is not shared by Debian and openSUSE"
 assert_contains '[mariadbd]' \
     "Debian MariaDB local-bind config group is missing"
 assert_contains '${SUDO} mariadbd --verbose --help' \
@@ -203,7 +240,11 @@ assert_contains \
 assert_contains 'ROOT_AUTH_MODE="socket"' \
     "Debian MariaDB does not preserve unix_socket root authentication"
 assert_contains 'ROOT_PASSWORD=""' \
-    "Debian MariaDB should not persist a root password"
+    "MariaDB should not persist a root password"
+assert_contains '"${DB_ROOT_CMD[@]}" "$DB_ADMIN_CLIENT" \' \
+    "database readiness does not use the platform admin client"
+assert_contains '--protocol=socket --silent ping' \
+    "database readiness does not use a local socket ping"
 assert_contains 'mysql_as_current_root <<SQL' \
     "database provisioning does not use the platform root authentication path"
 assert_contains \
@@ -230,12 +271,12 @@ assert_before \
     "database must exist before its privileges are granted"
 
 assert_contains \
-    'mysql -u root -p"${ROOT_PASSWORD}" -e "SELECT 1"' \
+    'db_client -u root -p"${ROOT_PASSWORD}" -e "SELECT 1"' \
     "root credential is not verified after provisioning"
 assert_count 2 '-D "$DB_NAME"' \
     "application verification must check database access on rerun and final paths"
 assert_contains \
-    'mysql -u "${DB_USER}" -p"${CDSI_PASSWORD}" -D "$DB_NAME"' \
+    'db_client -u "${DB_USER}" -p"${CDSI_PASSWORD}" -D "$DB_NAME"' \
     "final application connection does not select the CDSI database"
 
-printf 'PASS: Ubuntu/Debian/CentOS database mapping and provisioning safety contracts\n'
+printf 'PASS: Ubuntu/Debian/CentOS/openSUSE database mapping and safety contracts\n'

@@ -55,6 +55,24 @@ set_platform_fixture debian "12" "Debian GNU/Linux 12"
 assert_os_status 2
 set_platform_fixture debian "14" "Debian GNU/Linux 14"
 assert_os_status 2
+set_platform_fixture opensuse-leap "16.0" "openSUSE Leap 16.0"
+assert_os_status 0
+set_platform_fixture opensuse-leap "15.6" "openSUSE Leap 15.6"
+assert_os_status 2
+set_platform_fixture opensuse-leap "16.1" "openSUSE Leap 16.1"
+assert_os_status 2
+set_platform_fixture opensuse-tumbleweed "20260822" "openSUSE Tumbleweed"
+assert_os_status 2
+set_platform_fixture opensuse-microos "20260822" "openSUSE MicroOS"
+assert_os_status 2
+
+zypper() { :; }
+set_platform_fixture opensuse-leap "16.0" "openSUSE Leap 16.0"
+CDSI_PACKAGE_BACKEND="zypper"
+preflight_overall_status=0
+pf_check_package_manager >/dev/null
+[[ "$preflight_overall_status" -eq 0 ]] \
+    || { printf 'FAIL: available Zypper should pass preflight\n' >&2; exit 1; }
 
 assert_arch_status() {
     local expected="$1"
@@ -125,4 +143,29 @@ pf_check_firewalld >/dev/null
 [[ "$preflight_overall_status" -eq 0 ]] \
     || { printf 'FAIL: active firewalld should pass\n' >&2; exit 1; }
 
-printf 'PASS: supported releases, architecture, privileges, and CentOS security preflight\n'
+set_platform_fixture opensuse-leap "16.0" "openSUSE Leap 16.0"
+mock_selinux_mode="Disabled"
+preflight_overall_status=0
+pf_check_selinux >/dev/null
+[[ "$preflight_overall_status" -eq 1 ]] \
+    || { printf 'FAIL: disabled openSUSE SELinux should warn\n' >&2; exit 1; }
+
+mock_selinux_mode="Enforcing"
+preflight_overall_status=0
+pf_check_selinux >/dev/null
+[[ "$preflight_overall_status" -eq 0 ]] \
+    || { printf 'FAIL: enforcing openSUSE SELinux should pass\n' >&2; exit 1; }
+
+mock_firewalld_active=false
+preflight_overall_status=0
+pf_check_firewalld >/dev/null
+[[ "$preflight_overall_status" -eq 1 ]] \
+    || { printf 'FAIL: inactive openSUSE firewalld should warn\n' >&2; exit 1; }
+
+mock_firewalld_active=true
+preflight_overall_status=0
+pf_check_firewalld >/dev/null
+[[ "$preflight_overall_status" -eq 0 ]] \
+    || { printf 'FAIL: active openSUSE firewalld should pass\n' >&2; exit 1; }
+
+printf 'PASS: supported releases, architecture, privileges, Zypper, and firewalld preflight\n'

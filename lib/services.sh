@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Service operations for Ubuntu's systemd.
+# Service operations for supported systemd platforms.
 
 cdsi_service_installed() {
     local service="$1"

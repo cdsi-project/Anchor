@@ -32,6 +32,19 @@ extract_function() {
     || fail_test "WordPress implementation not found: ${WORDPRESS_SCRIPT}"
 bash -n "$WORDPRESS_SCRIPT" \
     || fail_test "WordPress implementation has invalid Bash syntax"
+grep -Fq 'lib/zypper.sh' "$WORDPRESS_SCRIPT" \
+    || fail_test "openSUSE WordPress path does not load the Zypper runtime"
+grep -Fq 'cdsi_uses_selinux || return 0' "$WORDPRESS_SCRIPT" \
+    || fail_test "WordPress SELinux integration is not shared by CentOS and openSUSE"
+grep -Fq 'setsebool -P httpd_can_network_connect on' "$WORDPRESS_SCRIPT" \
+    || fail_test "WordPress SELinux policy does not allow the required PHP-FPM and outbound network connections"
+grep -Fq '/etc/cdsi/selinux-httpd-network-boolean' "$WORDPRESS_SCRIPT" \
+    || fail_test "WordPress SELinux network policy is not recorded for scoped uninstall"
+[[ "$(grep -Fc 'getsebool "$boolean_name"' "$WORDPRESS_SCRIPT")" -ge 2 ]] \
+    || fail_test "WordPress SELinux network policy is not verified after reconciliation"
+if grep -Fq 'setsebool -P httpd_can_network_connect_db on' "$WORDPRESS_SCRIPT"; then
+    fail_test "WordPress must use the general web-network SELinux boolean, not the database-only boolean"
+fi
 
 expected_wp_package="wordpress-7.1-zh_CN.zip"
 expected_wp_sha256="6bd9237178dd870f7b47cf33e7129219d9bd2a85a92be641cf487c2cd61a2dba"
@@ -57,8 +70,10 @@ fi
 
 provision_php_function="$(extract_function provision_php)"
 configure_nginx_function="$(extract_function configure_nginx)"
-[[ -n "$provision_php_function" && -n "$configure_nginx_function" ]] \
-    || fail_test "could not extract WordPress PHP/Nginx functions"
+configure_selinux_function="$(extract_function configure_selinux)"
+[[ -n "$provision_php_function" && -n "$configure_nginx_function" \
+   && -n "$configure_selinux_function" ]] \
+    || fail_test "could not extract WordPress PHP/Nginx/SELinux functions"
 eval "$provision_php_function"
 eval "$configure_nginx_function"
 
@@ -274,4 +289,170 @@ assert_equal "$ip_link_before" \
    && ! -L "${migration_enabled}/broken.example.com.conf" ]] \
     || fail_test "failed migration retained the staged domain site"
 
-printf 'PASS: WordPress PHP reconciliation and transactional Nginx configuration\n'
+# Exercise SELinux reconciliation without touching the host. Each case rewrites
+# Anchor's marker directory into the disposable fixture and supplies command
+# shims for the policy state transitions owned by configure_selinux().
+if ! (
+    eval "$configure_selinux_function"
+    cdsi_uses_selinux() { return 1; }
+    getenforce() { fail_test "disabled SELinux path inspected enforcement"; }
+    configure_selinux
+); then
+    fail_test "disabled SELinux path should be a no-op"
+fi
+
+selinux_success_root="${fixture_dir}/selinux-success"
+selinux_success_function="$(printf '%s\n' "$configure_selinux_function" \
+    | sed "s|/etc/cdsi|${selinux_success_root}/state|g")"
+mkdir -p "${selinux_success_root}/wordpress"
+if ! (
+    eval "$selinux_success_function"
+    SUDO=""
+    WP_DIR="${selinux_success_root}/wordpress"
+    action_log="${selinux_success_root}/actions.log"
+    rule_state="${selinux_success_root}/rule"
+    boolean_state_file="${selinux_success_root}/boolean"
+    printf 'off\n' > "$boolean_state_file"
+    : > "$action_log"
+
+    cdsi_uses_selinux() { return 0; }
+    getenforce() { printf 'Enforcing\n'; }
+    cdsi_packages_install() { fail_test "SELinux tools were already mocked"; }
+    semanage() {
+        printf 'semanage:%s\n' "$*" >> "$action_log"
+        case "${1:-}:${2:-}" in
+            fcontext:-a)
+                [[ ! -e "$rule_state" ]] || return 1
+                printf '%s\n' "${WP_DIR}(/.*)?" > "$rule_state"
+                ;;
+            fcontext:-l)
+                [[ -e "$rule_state" ]] \
+                    && printf '%s all files system_u:object_r:httpd_sys_rw_content_t:s0\n' \
+                        "$(< "$rule_state")"
+                ;;
+            fcontext:-d)
+                rm -f -- "$rule_state"
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    restorecon() { printf 'restorecon:%s\n' "$*" >> "$action_log"; }
+    getsebool() {
+        printf 'getsebool:%s\n' "$*" >> "$action_log"
+        printf 'httpd_can_network_connect --> %s\n' "$(< "$boolean_state_file")"
+    }
+    setsebool() {
+        printf 'setsebool:%s\n' "$*" >> "$action_log"
+        printf '%s\n' "${3:-}" > "$boolean_state_file"
+    }
+
+    configure_selinux
+    configure_selinux
+); then
+    fail_test "SELinux first-run/idempotency reconciliation failed"
+fi
+assert_equal "${selinux_success_root}/wordpress(/.*)?" \
+    "$(< "${selinux_success_root}/state/selinux-wordpress-fcontext")" \
+    "SELinux file-context ownership marker"
+assert_equal "httpd_can_network_connect" \
+    "$(< "${selinux_success_root}/state/selinux-httpd-network-boolean")" \
+    "SELinux network-boolean ownership marker"
+assert_equal "1" \
+    "$(grep -Fc 'setsebool:-P httpd_can_network_connect on' \
+        "${selinux_success_root}/actions.log")" \
+    "SELinux idempotent boolean enable count"
+assert_equal "4" \
+    "$(grep -Fc 'getsebool:httpd_can_network_connect' \
+        "${selinux_success_root}/actions.log")" \
+    "SELinux initial and final boolean verification count"
+
+selinux_conflict_root="${fixture_dir}/selinux-conflict"
+selinux_conflict_function="$(printf '%s\n' "$configure_selinux_function" \
+    | sed "s|/etc/cdsi|${selinux_conflict_root}/state|g")"
+mkdir -p "${selinux_conflict_root}/wordpress"
+if (
+    eval "$selinux_conflict_function"
+    SUDO=""
+    WP_DIR="${selinux_conflict_root}/wordpress"
+    action_log="${selinux_conflict_root}/actions.log"
+    : > "$action_log"
+    fail() { exit 91; }
+    cdsi_uses_selinux() { return 0; }
+    getenforce() { printf 'Enforcing\n'; }
+    semanage() {
+        printf 'semanage:%s\n' "$*" >> "$action_log"
+        if [[ "${1:-}:${2:-}" == "fcontext:-l" ]]; then
+            printf '%s all files system_u:object_r:var_t:s0\n' "${WP_DIR}(/.*)?"
+        else
+            return 1
+        fi
+    }
+    restorecon() { printf 'restorecon\n' >> "$action_log"; }
+    getsebool() { printf 'httpd_can_network_connect --> on\n'; }
+    setsebool() { printf 'setsebool\n' >> "$action_log"; }
+    configure_selinux
+); then
+    fail_test "incompatible SELinux file-context rule unexpectedly succeeded"
+fi
+if grep -Eq '^(restorecon|setsebool)$' "${selinux_conflict_root}/actions.log"; then
+    fail_test "SELinux conflict path changed policy after detecting an incompatible rule"
+fi
+
+selinux_rollback_root="${fixture_dir}/selinux-rollback"
+selinux_rollback_function="$(printf '%s\n' "$configure_selinux_function" \
+    | sed "s|/etc/cdsi|${selinux_rollback_root}/state|g")"
+mkdir -p "${selinux_rollback_root}/wordpress"
+if (
+    eval "$selinux_rollback_function"
+    SUDO=""
+    WP_DIR="${selinux_rollback_root}/wordpress"
+    action_log="${selinux_rollback_root}/actions.log"
+    rule_state="${selinux_rollback_root}/rule"
+    boolean_state_file="${selinux_rollback_root}/boolean"
+    printf 'off\n' > "$boolean_state_file"
+    : > "$action_log"
+    fail() { exit 91; }
+    cdsi_uses_selinux() { return 0; }
+    getenforce() { printf 'Enforcing\n'; }
+    semanage() {
+        case "${1:-}:${2:-}" in
+            fcontext:-a) printf '%s\n' "${WP_DIR}(/.*)?" > "$rule_state" ;;
+            fcontext:-l)
+                printf '%s all files system_u:object_r:httpd_sys_rw_content_t:s0\n' \
+                    "$(< "$rule_state")"
+                ;;
+            fcontext:-d) rm -f -- "$rule_state" ;;
+            *) return 1 ;;
+        esac
+    }
+    restorecon() { return 0; }
+    getsebool() {
+        printf 'httpd_can_network_connect --> %s\n' "$(< "$boolean_state_file")"
+    }
+    setsebool() {
+        printf 'setsebool:%s\n' "$*" >> "$action_log"
+        printf '%s\n' "${3:-}" > "$boolean_state_file"
+    }
+    tee() {
+        local target="${*: -1}"
+        if [[ "$target" == *selinux-httpd-network-boolean ]]; then
+            return 1
+        fi
+        command tee "$@"
+    }
+    configure_selinux
+); then
+    fail_test "SELinux boolean marker write failure unexpectedly succeeded"
+fi
+assert_equal "off" "$(< "${selinux_rollback_root}/boolean")" \
+    "SELinux boolean rollback state"
+grep -Fqx 'setsebool:-P httpd_can_network_connect on' \
+    "${selinux_rollback_root}/actions.log" \
+    || fail_test "SELinux rollback case did not first enable the network boolean"
+grep -Fqx 'setsebool:-P httpd_can_network_connect off' \
+    "${selinux_rollback_root}/actions.log" \
+    || fail_test "SELinux rollback case did not restore the network boolean"
+[[ ! -e "${selinux_rollback_root}/state/selinux-httpd-network-boolean" ]] \
+    || fail_test "failed SELinux boolean marker was retained"
+
+printf 'PASS: WordPress PHP, SELinux, and transactional Nginx configuration\n'

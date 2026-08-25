@@ -249,9 +249,19 @@ pf_check_database_service() {
 }
 
 pf_check_selinux() {
-    cdsi_is_centos_stream || return 0
+    cdsi_uses_selinux || return 0
     local mode status
-    mode="$(getenforce 2>/dev/null || printf 'Unavailable')"
+    if command -v getenforce >/dev/null 2>&1; then
+        mode="$(getenforce 2>/dev/null || printf 'Unavailable')"
+    elif [[ -r /sys/fs/selinux/enforce ]]; then
+        if [[ "$(< /sys/fs/selinux/enforce)" == "1" ]]; then
+            mode="Enforcing"
+        else
+            mode="Permissive"
+        fi
+    else
+        mode="Disabled"
+    fi
     case "$mode" in
         Enforcing) status="$PF_OK" ;;
         *) status="$PF_WARN" ;;
@@ -261,7 +271,7 @@ pf_check_selinux() {
 }
 
 pf_check_firewalld() {
-    cdsi_is_centos_stream || return 0
+    cdsi_uses_firewalld || return 0
     local value status
     if cdsi_service_active firewalld; then
         value="Active"

@@ -65,6 +65,9 @@ platform_fixture="centos-stream"
 cdsi_is_centos_stream() {
     [[ "$platform_fixture" == "centos-stream" ]]
 }
+cdsi_is_opensuse_leap() {
+    [[ "$platform_fixture" == "opensuse-leap" ]]
+}
 cdsi_enable_epel() {
     printf 'enable-epel\n' >> "$epel_log"
 }
@@ -95,6 +98,65 @@ assert_equal "1" "$(wc -l < "$epel_log" | tr -d '[:space:]')" \
 assert_equal "false" "$CERTBOT_REPOSITORY_READY" \
     "Debian repository state must remain unchanged"
 
+platform_fixture="opensuse-leap"
+CERTBOT_REPOSITORY_READY=false
+prepare_certbot_repository
+assert_equal "1" "$(wc -l < "$epel_log" | tr -d '[:space:]')" \
+    "openSUSE Certbot path must not enable EPEL"
+assert_equal "false" "$CERTBOT_REPOSITORY_READY" \
+    "openSUSE repository state must remain unchanged"
+
+packages_function="$(extract_function certbot_packages)"
+nginx_package_function="$(extract_function certbot_nginx_package)"
+timer_package_function="$(extract_function certbot_timer_package)"
+timer_ensure_function="$(extract_function ensure_certbot_timer_package)"
+[[ -n "$packages_function" && -n "$nginx_package_function" \
+   && -n "$timer_package_function" && -n "$timer_ensure_function" ]] \
+    || fail_test "could not extract Certbot package mappings"
+eval "$packages_function"
+eval "$nginx_package_function"
+eval "$timer_package_function"
+eval "$timer_ensure_function"
+
+platform_fixture="ubuntu"
+mapfile -t certbot_package_plan < <(certbot_packages)
+assert_equal "certbot python3-certbot-nginx" \
+    "${certbot_package_plan[*]}" "APT Certbot package pair"
+assert_equal "python3-certbot-nginx" "$(certbot_nginx_package)" \
+    "APT Certbot Nginx plugin package"
+assert_equal "" "$(certbot_timer_package)" \
+    "APT must not request an independent Certbot timer package"
+
+platform_fixture="opensuse-leap"
+mapfile -t certbot_package_plan < <(certbot_packages)
+assert_equal \
+    "python313-certbot python313-certbot-nginx certbot-systemd-timer" \
+    "${certbot_package_plan[*]}" "openSUSE Certbot package plan"
+assert_equal "python313-certbot-nginx" "$(certbot_nginx_package)" \
+    "openSUSE Certbot Nginx plugin package"
+assert_equal "certbot-systemd-timer" "$(certbot_timer_package)" \
+    "openSUSE Certbot timer package"
+
+timer_package_log="${fixture_dir}/timer-package.log"
+: > "$timer_package_log"
+timer_package_installed=false
+cdsi_package_installed() {
+    [[ "$1" == "certbot-systemd-timer" \
+       && "$timer_package_installed" == true ]]
+}
+cdsi_packages_update() {
+    printf 'update\n' >> "$timer_package_log"
+}
+cdsi_packages_install() {
+    printf 'install:%s\n' "$*" >> "$timer_package_log"
+    [[ "$*" == "certbot-systemd-timer" ]] || return 1
+    timer_package_installed=true
+}
+ensure_certbot_timer_package
+ensure_certbot_timer_package
+assert_equal "1" "$(grep -Fc 'install:certbot-systemd-timer' "$timer_package_log")" \
+    "openSUSE timer package reconciliation must be idempotent"
+
 prepare_call_line="$(awk '
     /^[[:space:]]+prepare_certbot_repository$/ { print NR; exit }
 ' "$CERTBOT_SCRIPT")"
@@ -105,8 +167,16 @@ package_install_line="$(awk '
     || fail_test "could not locate Certbot repository/package installation order"
 (( prepare_call_line < package_install_line )) \
     || fail_test "Certbot package installation occurs before repository preparation"
-grep -Fq 'CERTBOT_PACKAGES=(certbot python3-certbot-nginx)' "$CERTBOT_SCRIPT" \
-    || fail_test "APT Certbot package pair changed"
+timer_reconcile_line="$(awk '$0 == "ensure_certbot_timer_package" { print NR; exit }' "$CERTBOT_SCRIPT")"
+plugin_check_line="$(awk '/^# Ensure the Nginx plugin/ { print NR; exit }' "$CERTBOT_SCRIPT")"
+[[ "$timer_reconcile_line" =~ ^[0-9]+$ && "$plugin_check_line" =~ ^[0-9]+$ ]] \
+    || fail_test "could not locate Certbot timer reconciliation order"
+(( timer_reconcile_line < plugin_check_line )) \
+    || fail_test "Certbot timer package must be reconciled before certificate or Nginx changes"
+grep -Fq 'mapfile -t CERTBOT_PACKAGES < <(certbot_packages)' "$CERTBOT_SCRIPT" \
+    || fail_test "Certbot installation does not use the platform package plan"
+grep -Fq 'lib/zypper.sh' "$CERTBOT_SCRIPT" \
+    || fail_test "openSUSE Certbot path does not load the Zypper runtime"
 grep -Fq 'Debian 13' "$CERTBOT_SCRIPT" \
     || fail_test "Certbot platform guard does not document Debian 13 support"
 
@@ -199,12 +269,46 @@ certbot() {
 }
 CERTBOT_BIN=certbot
 
-for unsupported_version in 4.2.0 5.3.9 invalid; do
+for unsupported_version in 4.2.0 5.1.0 5.3.9 invalid; do
     MOCK_CERTBOT_VERSION="$unsupported_version"
     if certbot_supports_ip_certificates; then
         fail_test "Certbot ${unsupported_version} unexpectedly supports IP certificates"
     fi
 done
+
+# The openSUSE system Certbot is below the IP-certificate capability floor.
+# That optional request must stop with the deferred status before any
+# certificate/Nginx work can change the existing HTTP site.
+ip_capability_guard="$(awk '
+    /^[[:space:]]+if ! certbot_supports_ip_certificates; then$/ { capture=1 }
+    capture { print }
+    capture && /^    fi$/ { exit }
+' "$CERTBOT_SCRIPT")"
+[[ -n "$ip_capability_guard" ]] \
+    || fail_test "could not extract the IP Certbot capability guard"
+http_state="${fixture_dir}/http-site.state"
+continuation_marker="${fixture_dir}/ip-capability-continued"
+printf 'http-only\n' > "$http_state"
+ip_guard_log=""
+ip_guard_rc=0
+if (
+    certbot_supports_ip_certificates() { return 1; }
+    log_fail() { ip_guard_log="$*"; }
+    eval "$ip_capability_guard"
+    printf 'continued\n' > "$continuation_marker"
+); then
+    fail_test "incapable Certbot unexpectedly continued into IP HTTPS"
+else
+    ip_guard_rc=$?
+fi
+assert_equal "10" "$ip_guard_rc" \
+    "incapable Certbot IP HTTPS deferred status"
+assert_equal "http-only" "$(tr -d '\r\n' < "$http_state")" \
+    "incapable Certbot changed the HTTP site"
+[[ ! -e "$continuation_marker" ]] \
+    || fail_test "incapable Certbot continued after the deferred guard"
+grep -Fq 'HTTP was not changed' <<< "$ip_capability_guard" \
+    || fail_test "IP capability deferral does not state that HTTP is preserved"
 for supported_version in 5.4.0 5.4.1 6.0.0; do
     MOCK_CERTBOT_VERSION="$supported_version"
     certbot_supports_ip_certificates \
@@ -291,6 +395,7 @@ run_timer_case() {
 run_timer_case ubuntu certbot.timer certbot.timer
 run_timer_case debian certbot.timer certbot.timer
 run_timer_case centos-stream certbot-renew.timer certbot-renew.timer
+run_timer_case opensuse-leap certbot-renew.timer certbot-renew.timer
 
 domain_guard="$(awk '
     index($0, "if [[ \"${#DOMAINS[@]}\" -eq 0 ]]") { capture=1 }
@@ -546,4 +651,4 @@ assert_equal "$non_anchor_before" \
     "$(sha256sum "${site_dir}/example.com.conf" | awk '{print $1}')" \
     "non-Anchor domain configuration must remain unchanged"
 
-printf 'PASS: Certbot Debian/EPEL, renewal, no-domain, and Anchor-only Nginx contracts\n'
+printf 'PASS: Certbot platform packages, deferred IP TLS, renewal, and Nginx contracts\n'

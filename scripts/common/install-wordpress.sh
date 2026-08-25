@@ -54,6 +54,8 @@ source "${CDSI_ROOT}/lib/platform.sh"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=../../lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=../../lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=../../lib/packages.sh
 source "${CDSI_ROOT}/lib/packages.sh"
 # shellcheck source=../../lib/services.sh
@@ -66,7 +68,7 @@ source "${CDSI_ROOT}/lib/wordpress-access.sh"
 source "${CDSI_ROOT}/lib/domain.sh"
 cdsi_platform_init
 cdsi_platform_supported \
-    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
+    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, CentOS Stream 10, and openSUSE Leap 16.0."
 PASS_DIR="${CDSI_ROOT}/password"
 MYSQL_PASS_FILE="${PASS_DIR}/mysql.pass"
 WP_PASS_FILE="${PASS_DIR}/wordpress.pass"
@@ -907,15 +909,29 @@ fix_ownership() {
 }
 
 configure_selinux() {
-    [[ "$CDSI_PLATFORM" == "centos-stream" ]] || return 0
-    command -v getenforce >/dev/null 2>&1 || return 0
-    [[ "$(getenforce 2>/dev/null || true)" != "Disabled" ]] || return 0
+    cdsi_uses_selinux || return 0
+    local selinux_mode="Disabled"
+    if command -v getenforce >/dev/null 2>&1; then
+        selinux_mode="$(getenforce 2>/dev/null || printf 'Disabled')"
+    elif [[ -r /sys/fs/selinux/enforce ]]; then
+        if [[ "$(< /sys/fs/selinux/enforce)" == "1" ]]; then
+            selinux_mode="Enforcing"
+        else
+            selinux_mode="Permissive"
+        fi
+    fi
+    [[ "$selinux_mode" != "Disabled" ]] || return 0
 
     if ! command -v semanage >/dev/null 2>&1; then
         log "Installing SELinux management tools..."
         cdsi_packages_install policycoreutils-python-utils \
             || fail "Failed to install SELinux management tools."
     fi
+    command -v semanage >/dev/null 2>&1 \
+        && command -v restorecon >/dev/null 2>&1 \
+        && command -v getsebool >/dev/null 2>&1 \
+        && command -v setsebool >/dev/null 2>&1 \
+        || fail "Required SELinux management commands are unavailable."
 
     local fcontext_pattern="${WP_DIR}(/.*)?"
     local fcontext_marker="/etc/cdsi/selinux-wordpress-fcontext"
@@ -937,20 +953,27 @@ configure_selinux() {
     ${SUDO} restorecon -RF "$WP_DIR" \
         || fail "Failed to apply the WordPress SELinux file context."
 
-    local boolean_marker="/etc/cdsi/selinux-httpd-db-boolean"
-    if command -v getsebool >/dev/null 2>&1 \
-       && getsebool httpd_can_network_connect_db 2>/dev/null | grep -q -- '--> off'; then
-        ${SUDO} setsebool -P httpd_can_network_connect_db on \
-            || fail "Failed to allow the web runtime to connect to the database under SELinux."
+    local boolean_marker="/etc/cdsi/selinux-httpd-network-boolean"
+    local boolean_name="httpd_can_network_connect"
+    local boolean_state=""
+    boolean_state="$(LC_ALL=C getsebool "$boolean_name" 2>/dev/null)" \
+        || fail "Could not inspect the required SELinux boolean ${boolean_name}."
+    if grep -q -- '--> off' <<< "$boolean_state"; then
+        ${SUDO} setsebool -P httpd_can_network_connect on \
+            || fail "Failed to allow the web runtime to use required network connections under SELinux."
         if ! ${SUDO} mkdir -p /etc/cdsi \
-           || ! printf '%s\n' 'httpd_can_network_connect_db' \
+           || ! printf '%s\n' 'httpd_can_network_connect' \
                 | ${SUDO} tee "$boolean_marker" >/dev/null \
            || ! ${SUDO} chmod 600 "$boolean_marker"; then
-            ${SUDO} setsebool -P httpd_can_network_connect_db off \
+            ${SUDO} setsebool -P httpd_can_network_connect off \
                 >/dev/null 2>&1 || true
             fail "Failed to record the Anchor-added SELinux boolean; the boolean was rolled back."
         fi
+    elif ! grep -q -- '--> on' <<< "$boolean_state"; then
+        fail "Unexpected state for the required SELinux boolean ${boolean_name}: ${boolean_state}."
     fi
+    LC_ALL=C getsebool "$boolean_name" 2>/dev/null | grep -q -- '--> on' \
+        || fail "SELinux boolean ${boolean_name} is not enabled after reconciliation."
 }
 
 # ── Main ───────────────────────────────────────────────────

@@ -48,6 +48,9 @@ cdsi_platform_init() {
             CDSI_DB_PACKAGE="mysql-server"
             CDSI_DB_SERVICE="mysql"
             CDSI_DB_FLAVOR="mysql"
+            CDSI_DB_CLIENT="mysql"
+            CDSI_DB_ADMIN_CLIENT="mysqladmin"
+            CDSI_DB_ANCHOR_CONFIG=""
             CDSI_CERTBOT_CONFIG_DIR="/etc/letsencrypt"
             CDSI_PHP_VERSION=""
             CDSI_PHP_PACKAGE_PREFIX="php"
@@ -70,6 +73,9 @@ cdsi_platform_init() {
             CDSI_DB_PACKAGE="mariadb-server"
             CDSI_DB_SERVICE="mariadb"
             CDSI_DB_FLAVOR="mariadb"
+            CDSI_DB_CLIENT="mysql"
+            CDSI_DB_ADMIN_CLIENT="mysqladmin"
+            CDSI_DB_ANCHOR_CONFIG="/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"
             CDSI_CERTBOT_CONFIG_DIR="/etc/letsencrypt"
             CDSI_PHP_VERSION=""
             CDSI_PHP_PACKAGE_PREFIX="php"
@@ -92,6 +98,9 @@ cdsi_platform_init() {
             CDSI_DB_PACKAGE="mysql8.4-server"
             CDSI_DB_SERVICE="mysqld"
             CDSI_DB_FLAVOR="mysql"
+            CDSI_DB_CLIENT="mysql"
+            CDSI_DB_ADMIN_CLIENT="mysqladmin"
+            CDSI_DB_ANCHOR_CONFIG="/etc/my.cnf.d/zz-cdsi-anchor.cnf"
             CDSI_CERTBOT_CONFIG_DIR="/etc/letsencrypt"
             CDSI_PHP_VERSION=""
             CDSI_PHP_PACKAGE_PREFIX="php"
@@ -99,6 +108,31 @@ cdsi_platform_init() {
             CDSI_PHP_FPM_BIN="/usr/sbin/php-fpm"
             CDSI_PHP_FPM_SERVICE="php-fpm"
             CDSI_PHP_FPM_UPSTREAM="unix:/run/php-fpm/www.sock"
+            ;;
+        opensuse-leap)
+            CDSI_PACKAGE_BACKEND="zypper"
+            CDSI_SERVICE_BACKEND="systemd"
+            CDSI_WEB_USER="wwwrun"
+            CDSI_WEB_GROUP="www"
+            CDSI_NGINX_SERVICE="nginx"
+            CDSI_NGINX_CONF_DIR="/etc/nginx"
+            CDSI_NGINX_MAIN_CONF="/etc/nginx/nginx.conf"
+            CDSI_NGINX_SITE_DIR="/etc/nginx/conf.d"
+            CDSI_NGINX_ENABLED_DIR="/etc/nginx/conf.d"
+            CDSI_NGINX_LOG_DIR="/var/log/nginx"
+            CDSI_DB_PACKAGE="mariadb"
+            CDSI_DB_SERVICE="mariadb"
+            CDSI_DB_FLAVOR="mariadb"
+            CDSI_DB_CLIENT="mariadb"
+            CDSI_DB_ADMIN_CLIENT="mariadb-admin"
+            CDSI_DB_ANCHOR_CONFIG="/etc/my.cnf.d/99-cdsi-anchor.cnf"
+            CDSI_CERTBOT_CONFIG_DIR="/etc/letsencrypt"
+            CDSI_PHP_VERSION="8.4"
+            CDSI_PHP_PACKAGE_PREFIX="php8"
+            CDSI_PHP_BIN="/usr/bin/php"
+            CDSI_PHP_FPM_BIN="/usr/sbin/php-fpm"
+            CDSI_PHP_FPM_SERVICE="php-fpm"
+            CDSI_PHP_FPM_UPSTREAM="127.0.0.1:9000"
             ;;
         *)
             CDSI_PACKAGE_BACKEND="unknown"
@@ -114,6 +148,9 @@ cdsi_platform_init() {
             CDSI_DB_PACKAGE=""
             CDSI_DB_SERVICE=""
             CDSI_DB_FLAVOR=""
+            CDSI_DB_CLIENT=""
+            CDSI_DB_ADMIN_CLIENT=""
+            CDSI_DB_ANCHOR_CONFIG=""
             CDSI_CERTBOT_CONFIG_DIR=""
             CDSI_PHP_VERSION=""
             CDSI_PHP_PACKAGE_PREFIX=""
@@ -137,6 +174,8 @@ cdsi_platform_init() {
     export CDSI_NGINX_SERVICE CDSI_NGINX_CONF_DIR
     export CDSI_NGINX_MAIN_CONF CDSI_NGINX_SITE_DIR CDSI_NGINX_ENABLED_DIR
     export CDSI_NGINX_LOG_DIR CDSI_DB_PACKAGE CDSI_DB_SERVICE CDSI_DB_FLAVOR
+    export CDSI_DB_CLIENT CDSI_DB_ADMIN_CLIENT
+    export CDSI_DB_ANCHOR_CONFIG
     export CDSI_MYSQL_PACKAGE CDSI_MYSQL_SERVICE CDSI_MYSQL_FLAVOR
     export CDSI_CERTBOT_CONFIG_DIR
     export CDSI_PHP_VERSION CDSI_PHP_PACKAGE_PREFIX CDSI_PHP_BIN
@@ -163,6 +202,23 @@ cdsi_is_centos_stream() {
     [[ "$CDSI_PLATFORM" == "centos-stream" ]]
 }
 
+cdsi_is_opensuse_leap() {
+    cdsi_platform_init
+    [[ "$CDSI_PLATFORM" == "opensuse-leap" ]]
+}
+
+cdsi_uses_firewalld() {
+    cdsi_platform_init
+    [[ "$CDSI_PLATFORM" == "centos-stream" \
+        || "$CDSI_PLATFORM" == "opensuse-leap" ]]
+}
+
+cdsi_uses_selinux() {
+    cdsi_platform_init
+    [[ "$CDSI_PLATFORM" == "centos-stream" \
+        || "$CDSI_PLATFORM" == "opensuse-leap" ]]
+}
+
 cdsi_platform_supported() {
     cdsi_platform_init
     if [[ -n "${CDSI_PLATFORM_ROUTE:-}" \
@@ -179,6 +235,9 @@ cdsi_platform_supported() {
             ;;
         centos-stream)
             [[ "$CDSI_OS_VERSION" == "10" ]] && cdsi_arch_supported
+            ;;
+        opensuse-leap)
+            [[ "$CDSI_OS_VERSION" == "16.0" ]] && cdsi_arch_supported
             ;;
         *)
             return 1
@@ -207,7 +266,7 @@ cdsi_php_service_name() {
                 printf 'php%s-fpm\n' "$version"
             fi
             ;;
-        centos-stream)
+        centos-stream|opensuse-leap)
             printf '%s\n' "$CDSI_PHP_FPM_SERVICE"
             ;;
         *)
@@ -219,7 +278,7 @@ cdsi_php_service_name() {
 cdsi_php_fpm_version() {
     cdsi_platform_init
     local depends="" unit=""
-    if cdsi_is_centos_stream; then
+    if cdsi_is_centos_stream || cdsi_is_opensuse_leap; then
         if [[ -x "$CDSI_PHP_BIN" ]]; then
             "$CDSI_PHP_BIN" \
                 -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null
@@ -260,7 +319,7 @@ cdsi_php_fpm_upstream() {
                 printf 'unix:/run/php/php%s-fpm.sock\n' "$version"
             fi
             ;;
-        centos-stream)
+        centos-stream|opensuse-leap)
             printf '%s\n' "$CDSI_PHP_FPM_UPSTREAM"
             ;;
         *)

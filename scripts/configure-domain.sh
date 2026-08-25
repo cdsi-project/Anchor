@@ -14,6 +14,8 @@ source "${CDSI_ROOT}/lib/platform.sh"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=../lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=../lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=../lib/packages.sh
 source "${CDSI_ROOT}/lib/packages.sh"
 # shellcheck source=../lib/services.sh

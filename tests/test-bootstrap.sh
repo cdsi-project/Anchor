@@ -31,8 +31,8 @@ sh -n "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh has invalid POSIX shell syntax"
 grep -Fqx '#!/bin/sh' "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap.sh must run before Bash is installed"
-grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.4"' "$BOOTSTRAP_SCRIPT" \
-    || fail_test "bootstrap is not pinned to the v0.3.4 release tag"
+grep -Fq 'CDSI_BOOTSTRAP_REF="v0.3.5"' "$BOOTSTRAP_SCRIPT" \
+    || fail_test "bootstrap is not pinned to the v0.3.5 release tag"
 bootstrap_release="$(
     sed -n 's/^CDSI_BOOTSTRAP_REF="\([^"]*\)"$/\1/p' "$BOOTSTRAP_SCRIPT"
 )"
@@ -48,10 +48,14 @@ assert_equal "/usr/sbin:/usr/bin:/sbin:/bin" \
 assert_equal "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     "$CDSI_BOOTSTRAP_INSTALLER_PATH" \
     "bootstrap installer PATH does not expose local administrative tools"
+assert_equal "/root/cdsi-Anchor" "$CDSI_BOOTSTRAP_DIR" \
+    "bootstrap default Anchor directory changed"
+grep -Fq 'default: /root/cdsi-Anchor' "$BOOTSTRAP_SCRIPT" \
+    || fail_test "bootstrap help does not show the default Anchor directory"
 posix_shell="$(command -v dash || command -v sh)"
 CDSI_BOOTSTRAP_SOURCE_ONLY=true "$posix_shell" -c '
     . "$1"
-    CDSI_BOOTSTRAP_DIR=/opt/cdsi-anchor
+    CDSI_BOOTSTRAP_DIR=/root/cdsi-Anchor
     bootstrap_validate_settings
     bootstrap_retry true
     bootstrap_repository_allowed https://gitee.com/cdsi/anchor.git
@@ -128,6 +132,7 @@ assert_platform ubuntu 24.04 Ubuntu apt
 assert_platform ubuntu 26.04 Ubuntu apt
 assert_platform debian 13 Debian apt
 assert_platform centos 10 "CentOS Stream" dnf
+assert_platform opensuse-leap 16.0 "openSUSE Leap" zypper
 
 unsupported_os="${fixture_dir}/os-debian-12"
 write_os_release "$unsupported_os" debian 12 Debian
@@ -154,6 +159,49 @@ if (
     bootstrap_detect_platform
 ) >/dev/null 2>&1; then
     fail_test "unsupported architecture unexpectedly passed bootstrap detection"
+fi
+
+unsupported_opensuse="${fixture_dir}/os-opensuse-leap-15.6"
+write_os_release "$unsupported_opensuse" opensuse-leap 15.6 "openSUSE Leap"
+if (
+    CDSI_BOOTSTRAP_OS_RELEASE_FILE="$unsupported_opensuse"
+    CDSI_BOOTSTRAP_ARCH_OVERRIDE="x86_64"
+    bootstrap_detect_platform
+) >/dev/null 2>&1; then
+    fail_test "openSUSE Leap 15.6 unexpectedly passed bootstrap detection"
+fi
+
+unsupported_opensuse_future="${fixture_dir}/os-opensuse-leap-16.1"
+write_os_release "$unsupported_opensuse_future" opensuse-leap 16.1 \
+    "openSUSE Leap"
+if (
+    CDSI_BOOTSTRAP_OS_RELEASE_FILE="$unsupported_opensuse_future"
+    CDSI_BOOTSTRAP_ARCH_OVERRIDE="x86_64"
+    bootstrap_detect_platform
+) >/dev/null 2>&1; then
+    fail_test "openSUSE Leap 16.1 unexpectedly passed bootstrap detection"
+fi
+
+unsupported_tumbleweed="${fixture_dir}/os-opensuse-tumbleweed"
+write_os_release "$unsupported_tumbleweed" opensuse-tumbleweed 20260822 \
+    "openSUSE Tumbleweed"
+if (
+    CDSI_BOOTSTRAP_OS_RELEASE_FILE="$unsupported_tumbleweed"
+    CDSI_BOOTSTRAP_ARCH_OVERRIDE="x86_64"
+    bootstrap_detect_platform
+) >/dev/null 2>&1; then
+    fail_test "openSUSE Tumbleweed unexpectedly passed bootstrap detection"
+fi
+
+unsupported_microos="${fixture_dir}/os-opensuse-microos"
+write_os_release "$unsupported_microos" opensuse-microos 20260822 \
+    "openSUSE MicroOS"
+if (
+    CDSI_BOOTSTRAP_OS_RELEASE_FILE="$unsupported_microos"
+    CDSI_BOOTSTRAP_ARCH_OVERRIDE="x86_64"
+    bootstrap_detect_platform
+) >/dev/null 2>&1; then
+    fail_test "openSUSE MicroOS unexpectedly passed bootstrap detection"
 fi
 
 if (
@@ -183,6 +231,10 @@ bootstrap_dnf_available() { return 0; }
 bootstrap_dnf() {
     printf 'dnf %s\n' "$*" >> "$CDSI_BOOTSTRAP_COMMAND_LOG"
 }
+bootstrap_zypper_available() { return 0; }
+bootstrap_zypper() {
+    printf 'zypper %s\n' "$*" >> "$CDSI_BOOTSTRAP_COMMAND_LOG"
+}
 
 : > "$command_log"
 CDSI_BOOTSTRAP_PLATFORM=apt
@@ -210,6 +262,24 @@ grep -Fq 'install bash ca-certificates coreutils curl git' "$command_log" \
 if grep -Eiq 'epel|remi|(^| )update( |$)|(^| )upgrade( |$)' "$command_log"; then
     fail_test "bootstrap must not enable third-party repositories or upgrade the system"
 fi
+
+: > "$command_log"
+CDSI_BOOTSTRAP_PLATFORM=zypper
+CDSI_BOOTSTRAP_OS=opensuse-leap
+bootstrap_prepare_zypper >/dev/null
+assert_equal "2" "$(wc -l < "$command_log" | tr -d '[:space:]')" \
+    "Zypper bootstrap must run exactly metadata refresh and package installation"
+grep -Fqx 'zypper refresh' "$command_log" \
+    || fail_test "Zypper bootstrap does not refresh repository metadata"
+grep -Fqx \
+    'zypper install --no-recommends bash ca-certificates coreutils curl git' \
+    "$command_log" || fail_test "Zypper bootstrap tool set is incomplete"
+if grep -Eiq 'repo(add|remove)|(^| )update( |$)|(^| )upgrade( |$)' \
+    "$command_log"; then
+    fail_test "Zypper bootstrap must not replace repositories or upgrade the system"
+fi
+grep -Fq 'zypper --non-interactive "$@"' "$BOOTSTRAP_SCRIPT" \
+    || fail_test "Zypper bootstrap does not use non-interactive mode"
 grep -Fq 'timeout --foreground "$CDSI_BOOTSTRAP_PACKAGE_TIMEOUT"' \
     "$BOOTSTRAP_SCRIPT" \
     || fail_test "bootstrap package operations do not have a total timeout"
@@ -238,12 +308,40 @@ if (
     fail_test "bootstrap accepted a relative checkout path"
 fi
 if (
-    CDSI_BOOTSTRAP_DIR="/opt/cdsi-anchor"
+    CDSI_BOOTSTRAP_DIR="/root/cdsi-Anchor"
     CDSI_BOOTSTRAP_RETRY_ATTEMPTS=0
     bootstrap_validate_settings
 ) >/dev/null 2>&1; then
     fail_test "bootstrap accepted a zero retry budget"
 fi
+
+same_name_file="${fixture_dir}/cdsi-Anchor"
+printf '%s\n' 'keep this file' > "$same_name_file"
+if (
+    CDSI_BOOTSTRAP_DIR="$same_name_file"
+    bootstrap_check_target_path
+) >/dev/null 2>&1; then
+    fail_test "bootstrap accepted an existing file at the Anchor target path"
+fi
+assert_equal "keep this file" "$(<"$same_name_file")" \
+    "bootstrap changed the existing same-name file"
+
+same_name_directory="${fixture_dir}/existing-cdsi-Anchor"
+mkdir -p "$same_name_directory"
+if (
+    CDSI_BOOTSTRAP_DIR="$same_name_directory"
+    bootstrap_check_target_path
+) >/dev/null 2>&1; then
+    fail_test "bootstrap accepted an existing non-Git Anchor target directory"
+fi
+
+existing_checkout="${fixture_dir}/existing-checkout"
+mkdir -p "$existing_checkout/.git"
+(
+    CDSI_BOOTSTRAP_DIR="$existing_checkout"
+    bootstrap_check_target_path
+) || fail_test "bootstrap rejected an existing Git checkout before validation"
+
 if (
     bootstrap_git() { printf '%s\n' commit; }
     bootstrap_release_tag_valid /tmp/anchor
@@ -569,4 +667,4 @@ grep -Fq 'merge --ff-only' "$BOOTSTRAP_SCRIPT" \
 grep -Fq 'bootstrap_exec_installer </dev/tty' "$BOOTSTRAP_SCRIPT" \
     || fail_test "piped bootstrap does not restore the interactive terminal"
 
-printf 'PASS: remote bootstrap platform, package, mirror, and checkout safety contracts\n'
+printf 'PASS: remote bootstrap platform, APT/DNF/Zypper, mirror, and checkout safety contracts\n'

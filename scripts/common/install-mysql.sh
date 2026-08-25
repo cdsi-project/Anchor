@@ -9,7 +9,7 @@ fi
 # Installs MySQL or MariaDB from the operating system's default package source.
 # After install:
 #   • MySQL: sets a random root password with caching_sha2_password.
-#   • MariaDB: preserves Debian's local unix_socket root authentication.
+#   • MariaDB: preserves the platform's local unix_socket root authentication.
 #   • Creates database `cdsi` and user `cdsi`@localhost with a
 #     random 10-char password.
 #   • Saves the root authentication state and cdsi password to
@@ -53,13 +53,15 @@ source "${CDSI_ROOT}/lib/platform.sh"
 source "${CDSI_ROOT}/lib/apt.sh"
 # shellcheck source=../../lib/dnf.sh
 source "${CDSI_ROOT}/lib/dnf.sh"
+# shellcheck source=../../lib/zypper.sh
+source "${CDSI_ROOT}/lib/zypper.sh"
 # shellcheck source=../../lib/packages.sh
 source "${CDSI_ROOT}/lib/packages.sh"
 # shellcheck source=../../lib/services.sh
 source "${CDSI_ROOT}/lib/services.sh"
 cdsi_platform_init
 cdsi_platform_supported \
-    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, and CentOS Stream 10."
+    || fail "Unsupported operating system. Anchor supports Ubuntu 24.04/26.04 LTS, Debian 13, CentOS Stream 10, and openSUSE Leap 16.0."
 
 PASS_DIR="${CDSI_ROOT}/password"
 PASS_FILE="${PASS_DIR}/mysql.pass"
@@ -72,6 +74,22 @@ if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
 else
     DB_LABEL="MySQL"
 fi
+DB_CLIENT="$CDSI_DB_CLIENT"
+DB_ADMIN_CLIENT="$CDSI_DB_ADMIN_CLIENT"
+DB_ROOT_CMD=()
+[[ -z "$SUDO" ]] || DB_ROOT_CMD=("$SUDO")
+
+db_client_available() {
+    [[ -n "$DB_CLIENT" ]] && command -v "$DB_CLIENT" >/dev/null 2>&1
+}
+
+db_client() {
+    "$DB_CLIENT" "$@"
+}
+
+db_local_root() {
+    "${DB_ROOT_CMD[@]}" "$DB_CLIENT" --protocol=socket -u root "$@"
+}
 
 # ── Password Generation (10-char alphanumeric) ─────────────
 generate_password() {
@@ -110,9 +128,11 @@ write_credentials() {
 }
 
 configure_mysql_network() {
-    if cdsi_is_debian; then
-        local config_file="/etc/mysql/mariadb.conf.d/99-cdsi-anchor.cnf"
+    if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
+        local config_file="$CDSI_DB_ANCHOR_CONFIG"
         local temp_file
+        [[ -n "$config_file" ]] \
+            || fail "The MariaDB Anchor configuration path is not defined."
         temp_file="$(mktemp "${TMPDIR:-/tmp}/cdsi-mariadb-network.XXXXXX")" \
             || fail "Could not create a temporary MariaDB network configuration."
         cat > "$temp_file" <<'MARIADB_NETWORK_CONFIG'
@@ -130,6 +150,8 @@ MARIADB_NETWORK_CONFIG
             fail "Existing Anchor MariaDB network configuration differs: ${config_file}. It was not overwritten."
         fi
 
+        ${SUDO} mkdir -p "$(dirname "$config_file")" \
+            || { rm -f -- "$temp_file"; fail "Failed to prepare $(dirname "$config_file")."; }
         ${SUDO} install -m 0644 "$temp_file" "$config_file" \
             || { rm -f -- "$temp_file"; fail "Failed to install ${config_file}."; }
         rm -f -- "$temp_file"
@@ -144,7 +166,7 @@ MARIADB_NETWORK_CONFIG
 
     cdsi_is_centos_stream || return 0
 
-    local config_file="/etc/my.cnf.d/zz-cdsi-anchor.cnf"
+    local config_file="$CDSI_DB_ANCHOR_CONFIG"
     local temp_file
     temp_file="$(mktemp "${TMPDIR:-/tmp}/cdsi-mysql-network.XXXXXX")" \
         || fail "Could not create a temporary MySQL network configuration."
@@ -176,7 +198,7 @@ MYSQL_NETWORK_CONFIG
 }
 
 verify_mysql_local_listeners() {
-    if ! cdsi_is_centos_stream && ! cdsi_is_debian; then
+    if [[ -z "$CDSI_DB_ANCHOR_CONFIG" ]]; then
         return 0
     fi
     command -v ss >/dev/null 2>&1 \
@@ -231,8 +253,10 @@ wait_for_mysql() {
     local ready=0
     local i
     for i in $(seq 1 60); do
-        if command -v mysqladmin >/dev/null 2>&1 \
-           && ${SUDO} mysqladmin --protocol=socket --silent ping >/dev/null 2>&1; then
+        if [[ -n "$DB_ADMIN_CLIENT" ]] \
+           && command -v "$DB_ADMIN_CLIENT" >/dev/null 2>&1 \
+           && "${DB_ROOT_CMD[@]}" "$DB_ADMIN_CLIENT" \
+                --protocol=socket --silent ping >/dev/null 2>&1; then
             ready=1
             break
         fi
@@ -268,7 +292,7 @@ fi
 # ── Idempotency / skip ────────────────────────────────────
 # Fully done when the database is installed, the credential file records the
 # platform root-auth state and cdsi password, and both connections succeed.
-if command -v mysql >/dev/null 2>&1 \
+if db_client_available \
    && cdsi_service_installed "${CDSI_MYSQL_SERVICE}" \
    && [[ -f "$PASS_FILE" ]]; then
     reconcile_mysql_runtime
@@ -276,14 +300,14 @@ if command -v mysql >/dev/null 2>&1 \
     STORED_CDSI="$(stored_cred cdsi)"
     ROOT_AUTH_READY=false
     if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
-        ${SUDO} mysql -u root -e "SELECT 1" >/dev/null 2>&1 \
+        db_local_root -e "SELECT 1" >/dev/null 2>&1 \
             && ROOT_AUTH_READY=true
     elif [[ -n "$STORED_ROOT" ]] \
-         && mysql -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1; then
+         && db_client -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1; then
         ROOT_AUTH_READY=true
     fi
     if [[ "$ROOT_AUTH_READY" == true && -n "$STORED_CDSI" ]] \
-       && mysql -u "${DB_USER}" -p"$STORED_CDSI" -D "$DB_NAME" \
+       && db_client -u "${DB_USER}" -p"$STORED_CDSI" -D "$DB_NAME" \
             -e "SELECT 1" >/dev/null 2>&1; then
         log "${DB_LABEL} is already installed and the Anchor database credentials are valid."
         log_ok "${DB_LABEL} is already running."
@@ -297,27 +321,31 @@ fi
 if cdsi_is_centos_stream && cdsi_package_installed mariadb-server; then
     fail "MariaDB Server is already installed. Anchor will not replace an existing database server with MySQL 8.4."
 fi
-if cdsi_is_debian && command -v mysql >/dev/null 2>&1 \
+if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]] \
+   && db_client_available \
    && ! cdsi_service_installed mariadb \
    && { cdsi_service_installed mysql || cdsi_service_installed mysqld; }; then
-    fail "An unsupported database server is already installed. Anchor will not replace it with Debian's default MariaDB service."
+    fail "An unsupported database server is already installed. Anchor will not replace it with ${CDSI_OS_PRETTY}'s MariaDB service."
 fi
 
-if ! command -v mysql >/dev/null 2>&1 \
+if ! db_client_available \
    || ! cdsi_service_installed "${CDSI_MYSQL_SERVICE}"; then
-    MYSQL_PACKAGE="${CDSI_DB_PACKAGE}"
-    log "Installing ${MYSQL_PACKAGE} from the system default package source..."
+    DB_PACKAGES=("${CDSI_DB_PACKAGE}")
+    if cdsi_is_opensuse_leap; then
+        DB_PACKAGES+=(mariadb-client)
+    fi
+    log "Installing ${DB_PACKAGES[*]} from the system default package source..."
 
     cdsi_packages_update \
         || log "Package metadata update failed; continuing with cached metadata..."
 
-    cdsi_packages_install "${MYSQL_PACKAGE}" \
-        || fail "Package installation failed for ${MYSQL_PACKAGE}."
+    cdsi_packages_install "${DB_PACKAGES[@]}" \
+        || fail "Package installation failed for: ${DB_PACKAGES[*]}."
 
-    command -v mysql >/dev/null 2>&1 \
-        || fail "The MySQL client was not installed with ${MYSQL_PACKAGE}."
+    db_client_available \
+        || fail "The ${DB_LABEL} client '${DB_CLIENT}' was not installed."
     cdsi_service_installed "${CDSI_MYSQL_SERVICE}" \
-        || fail "${MYSQL_PACKAGE} did not install service '${CDSI_MYSQL_SERVICE}'."
+        || fail "${CDSI_DB_PACKAGE} did not install service '${CDSI_MYSQL_SERVICE}'."
 
     log_ok "${DB_LABEL} package installed."
 fi
@@ -339,19 +367,19 @@ log "Generating random 10-character passwords..."
 ROOT_NEEDS_ALTER=true
 ROOT_AUTH_MODE=""
 if [[ "$CDSI_DB_FLAVOR" == "mariadb" ]]; then
-    ${SUDO} mysql -u root -e "SELECT 1" >/dev/null 2>&1 \
+    db_local_root -e "SELECT 1" >/dev/null 2>&1 \
         || fail "MariaDB local unix_socket root authentication is unavailable. Existing root authentication was not changed."
     ROOT_PASSWORD=""
     ROOT_NEEDS_ALTER=false
     ROOT_AUTH_MODE="socket"
     log "  Preserving MariaDB root unix_socket authentication."
 elif [[ -n "$STORED_ROOT" ]] \
-     && mysql -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1; then
+     && db_client -u root -p"$STORED_ROOT" -e "SELECT 1" >/dev/null 2>&1; then
     ROOT_PASSWORD="$STORED_ROOT"
     ROOT_NEEDS_ALTER=false
     ROOT_AUTH_MODE="stored"
     log "  Reusing the stored MySQL root credential (recovery/rerun path)."
-elif ${SUDO} mysql -u root -e "SELECT 1" >/dev/null 2>&1; then
+elif db_local_root -e "SELECT 1" >/dev/null 2>&1; then
     ROOT_PASSWORD="$(generate_password)"
     ROOT_AUTH_MODE="passwordless"
     log "  Generated a new MySQL root password."
@@ -361,9 +389,9 @@ fi
 
 mysql_as_current_root() {
     if [[ "$ROOT_AUTH_MODE" == "stored" ]]; then
-        mysql -u root -p"$ROOT_PASSWORD" "$@"
+        db_client -u root -p"$ROOT_PASSWORD" "$@"
     else
-        ${SUDO} mysql -u root "$@"
+        db_local_root "$@"
     fi
 }
 
@@ -393,10 +421,10 @@ log_ok "Credentials saved to: ${PASS_FILE} (mode 600)"
 
 if [[ "$ROOT_NEEDS_ALTER" == true ]]; then
     log "Setting the MySQL root password..."
-    ${SUDO} mysql -u root <<SQL
+    db_local_root <<SQL
 ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${ROOT_PASSWORD}';
 SQL
-    mysql -u root -p"${ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1 \
+    db_client -u root -p"${ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1 \
         || fail "MySQL root password changed, but the stored credential could not be verified."
     ROOT_AUTH_MODE="stored"
 fi
@@ -419,7 +447,7 @@ else
     log_fail "${DB_LABEL} root authentication failed."
     fail "root authentication verification failed."
 fi
-if mysql -u "${DB_USER}" -p"${CDSI_PASSWORD}" -D "$DB_NAME" \
+if db_client -u "${DB_USER}" -p"${CDSI_PASSWORD}" -D "$DB_NAME" \
     -e "SELECT 1" >/dev/null 2>&1; then
     log_ok "  ${DB_USER}@localhost auth: OK"
 else
@@ -429,7 +457,7 @@ fi
 
 # ── Summary ───────────────────────────────────────────────
 log_ok "${DB_LABEL} installation complete."
-log "  Version:         $(mysql -V | awk '{print $3}')"
+log "  Version:         $(db_client -V | awk '{print $3}')"
 log "  Service:         active (enabled on boot)"
 log "  Database:        ${DB_NAME} (utf8mb4)"
 log "  User:            ${DB_USER}@localhost"

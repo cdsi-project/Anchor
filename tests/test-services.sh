@@ -132,9 +132,15 @@ assert_success "Debian MariaDB service should use systemd" \
     cdsi_service_installed mariadb
 assert_success "Debian versioned PHP-FPM service should use systemd" \
     cdsi_service_active php8.4-fpm
+assert_success "openSUSE MariaDB service should use systemd" \
+    cdsi_service_installed mariadb
+assert_success "openSUSE PHP-FPM service should use systemd" \
+    cdsi_service_active php-fpm
+assert_success "openSUSE Nginx service should use systemd" \
+    cdsi_service_enabled nginx
 
 CDSI_SERVICE_BACKEND="unknown"
 assert_failure "unknown service backend unexpectedly succeeded" \
     cdsi_service_active nginx
 
-printf 'PASS: Ubuntu, Debian, and CentOS Stream systemd service mappings\n'
+printf 'PASS: Ubuntu, Debian, CentOS Stream, and openSUSE Leap systemd mappings\n'
