@@ -4,10 +4,12 @@
 
 # CDSI Anchor
 
-**Creator Digital Sovereignty Infrastructure**<br>
 **创作者数字主权基础设施**<br>
+**Creator Digital Sovereignty Infrastructure**<br>
 
-## 中文简介
+[中文](#中文) | [English](#english)
+
+## 中文
 
 **CDSI（Creator Digital Sovereignty Infrastructure，创作者数字主权基础设施）**是一套面向创作者的开放数字基础设施。
 
@@ -34,6 +36,186 @@ CDSI 的核心原则是：
 Anchor 的产品定位、当前边界和已知限制见 [CDSI-Anchor](CDSI-Anchor.md)。
 
 ---
+
+## 安装前准备
+
+Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13**、
+**CentOS Stream 10** 和 **openSUSE Leap 16.0**。
+
+### 必需
+
+1. **一台干净的受支持 Linux 服务器**
+   - 支持 `x86_64` 和 `aarch64` 架构
+   - 安装脚本要求至少 1 核 CPU；预检以 1GB 内存和 10GB 根分区可用空间作为
+     警告阈值，低于阈值时会提示但允许继续
+   - 建议至少 2GB 内存，正式环境推荐 4GB 内存和 20GB 根分区可用空间
+   - 登录用户需要 root 或 sudo 权限
+2. **稳定的公网入口和网络连接**
+   - 准备公网 IP
+   - 防火墙开放 80、443 端口
+3. **交互式 SSH 终端**
+   - Xshell
+   - GitBash
+   - PowerShell
+没有域名也可以安装。Anchor 会先完成基础服务和 WordPress，再把域名与 HTTPS
+作为最后一个可选步骤；直接按 Enter 即可跳过。默认网站地址为
+`http://<服务器公网 IP>`，WordPress 和 Beacon Application Password 仍会创建。
+输入的域名只有在 A/AAAA 解析严格匹配本机后才会生效；未就绪的域名保存在
+`config/domain.pending`，不会改动当前 WordPress URL 或 Nginx 站点，也不会让
+已经完成的基础安装失败。
+
+公网 IP 也可以显式申请公信 HTTPS，但必须是公网 IPv4，且系统提供的 Certbot
+必须为 5.4 或更高版本并支持 Let's Encrypt `shortlived` profile。能力不足时
+Anchor 保持现有 HTTP 站点，不会安装不受信任证书，也不承诺 CentOS Stream
+当前系统包一定满足该版本要求。Debian 13 默认源提供的 Certbot 4.0、openSUSE
+Leap 16.0 默认源提供的 Certbot 5.1 均支持域名 HTTPS，但不满足 IP 证书所需的
+Certbot 5.4+ 能力。公网 IP 探测受限时可显式传入 `CDSI_SERVER_IP`。
+
+### 建议
+
+- 优先使用干净、专用的服务器，不要与已有生产网站、数据库或共享运行时混用。
+- 如果服务器已有业务数据或配置，也可单独安装 Anchor 组件。
+- 长时间安装可在 `tmux` 或 `screen` 会话中执行，避免 SSH 中断影响交互流程。
+
+---
+
+## 安装体验
+
+### Agent Skill MVP（实验性）
+
+仓库提供 `$anchor-install-server` Skill。用户只需提供一台干净、专用的受支持
+Linux 服务器及 root SSH 登录方式，Agent 会完成环境检查、固定版本引导、基础
+组件安装、独立验收和结果交付。没有域名不会阻塞安装，最终先提供 IP HTTP 站点。
+
+#### 1. 获取 Anchor 并打开仓库
+
+```bash
+git clone https://gitee.com/cdsi/anchor.git
+cd anchor
+```
+
+使用支持仓库级 Agent Skills 的 Codex 打开该目录。Skill 位于
+`.agents/skills/anchor-install-server`，无需单独执行其中的文件。也可以将该
+目录复制到用户级 `~/.agents/skills/`，在其他项目中调用。其他 Agent 需要兼容
+Agent Skills，并具备本地 SSH 和终端执行能力。
+
+#### 2. 准备 root SSH 登录
+
+推荐预先配置公钥，并先确认本机能够连接：
+
+```bash
+ssh root@SERVER_IP
+```
+
+可以把本机私钥的文件路径告诉 Agent，但不要在聊天中粘贴私钥正文、root 密码
+或密钥口令。密码或口令只能由用户在自己控制的安全终端提示中输入；如果当前
+Agent 环境不支持安全输入，应改用公钥登录。
+
+#### 3. 调用 Skill
+
+```text
+$anchor-install-server
+
+请在 SERVER_IP 上安装 Anchor。
+SSH 用户：root
+SSH 端口：22
+认证密钥：本机已有的私钥文件路径
+这是一台我拥有并授权安装的全新专用服务器。
+暂时没有域名，先通过 IP 完成安装。
+```
+
+Agent 会先确认 SSH 主机指纹并执行只读检查，再安装 Nginx、MySQL/MariaDB、
+PHP-FPM 和 WordPress，最后验证服务启动、开机启用、WordPress 数据库连接及
+客户端侧公网访问。发现已有网站、数据库、证书、80/443 端口占用或不明确状态
+时会停止；追加一句“继续”也不会绕过干净服务器门禁。
+
+#### 4. 查看登录凭据
+
+安装结果会返回网站地址、WordPress 后台地址和验收状态。为了避免密码进入
+Agent 记录，凭据值保留在服务器中，由用户在自己的 root SSH 终端查看：
+
+```bash
+cat /root/cdsi-Anchor/password/wordpress.pass
+cat /root/cdsi-Anchor/password/wordpress-beacon.pass
+```
+
+没有有效 HTTPS 时不要通过公网提交这些凭据。域名解析生效后，可以继续调用
+Skill 所在的 Agent：
+
+```text
+请为刚安装的 Anchor 节点配置域名 example.com 和 HTTPS。
+```
+
+Skill 会单独确认域名与证书授权；DNS 或证书暂时不可用不会推翻已完成的基础
+安装。完整支持范围、人工安装方式和故障处理见 [完整安装指南](INSTALL.md)。
+
+### 新服务器快速启动
+
+国内服务器使用 Gitee 下载远程引导脚本：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh \
+  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
+```
+
+只有 `wget` 时：
+
+```bash
+wget -qO anchor-bootstrap.sh \
+  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh && \
+  sh anchor-bootstrap.sh
+```
+
+脚本会自动完成以下步骤：
+
+1. 检查操作系统、CPU 架构、systemd、root/sudo 权限和交互终端。
+2. 刷新当前系统默认 APT/DNF/Zypper 仓库的元数据，不改写软件源、不执行全系统升级。
+3. 安装 `bash`、Git、curl、CA 证书和 coreutils。
+4. 自动进入 `install.sh` 的交互菜单。
+
+Anchor 默认保存到 `/root/cdsi-Anchor`。保存前会检查目标路径；同名普通文件、
+非 Git 目录或符号链接均不会被覆盖。已有目录只有在确认是 bootstrap 管理、
+来源可信且工作区干净的 Anchor 仓库后，才会以 fast-forward 方式更新。
+
+脚本下载到本地后再执行，因此用户可以先检查内容；非 root 用户执行时会通过
+`sudo` 请求权限。远程可执行脚本只通过 HTTPS 分发，不提供 HTTP 入口。
+
+GitHub 下载入口：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.5/bootstrap.sh \
+  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
+```
+
+只准备环境和代码、不立即进入安装菜单：
+
+```bash
+sh anchor-bootstrap.sh --no-start
+```
+
+### 手动安装
+
+已有 Git 时仍可手动克隆。国内服务器建议使用 Gitee：
+
+```bash
+git clone https://gitee.com/cdsi/anchor.git Anchor
+cd Anchor
+sudo ./install.sh
+```
+
+也可以使用 GitHub：
+
+```bash
+git clone https://github.com/cdsi-project/Anchor.git Anchor
+cd Anchor
+sudo ./install.sh
+```
+
+---
+
+## English
 
 CDSI is an open-source infrastructure project for creators who want to own and control their digital identity, content, data, and audience relationships.
 
@@ -272,183 +454,7 @@ The following are planned and should not be considered implemented by Anchor:
 
 ---
 
-## 安装前准备
-
-Anchor 当前支持 **Ubuntu Server 24.04/26.04 LTS**、**Debian 13**、
-**CentOS Stream 10** 和 **openSUSE Leap 16.0**。
-
-### 必需
-
-1. **一台干净的受支持 Linux 服务器**
-   - 支持 `x86_64` 和 `aarch64` 架构
-   - 安装脚本要求至少 1 核 CPU；预检以 1GB 内存和 10GB 根分区可用空间作为
-     警告阈值，低于阈值时会提示但允许继续
-   - 建议至少 2GB 内存，正式环境推荐 4GB 内存和 20GB 根分区可用空间
-   - 登录用户需要 root 或 sudo 权限
-2. **稳定的公网入口和网络连接**
-   - 准备公网 IP
-   - 防火墙开放 80、443 端口
-3. **交互式 SSH 终端**
-   - Xshell
-   - GitBash
-   - PowerShell
-
-
-没有域名也可以安装。Anchor 会先完成基础服务和 WordPress，再把域名与 HTTPS
-作为最后一个可选步骤；直接按 Enter 即可跳过。默认网站地址为
-`http://<服务器公网 IP>`，WordPress 和 Beacon Application Password 仍会创建。
-输入的域名只有在 A/AAAA 解析严格匹配本机后才会生效；未就绪的域名保存在
-`config/domain.pending`，不会改动当前 WordPress URL 或 Nginx 站点，也不会让
-已经完成的基础安装失败。
-
-公网 IP 也可以显式申请公信 HTTPS，但必须是公网 IPv4，且系统提供的 Certbot
-必须为 5.4 或更高版本并支持 Let's Encrypt `shortlived` profile。能力不足时
-Anchor 保持现有 HTTP 站点，不会安装不受信任证书，也不承诺 CentOS Stream
-当前系统包一定满足该版本要求。Debian 13 默认源提供的 Certbot 4.0、openSUSE
-Leap 16.0 默认源提供的 Certbot 5.1 均支持域名 HTTPS，但不满足 IP 证书所需的
-Certbot 5.4+ 能力。公网 IP 探测受限时可显式传入 `CDSI_SERVER_IP`。
-
-### 建议
-
-- 优先使用干净、专用的服务器，不要与已有生产网站、数据库或共享运行时混用。
-- 如果服务器已有业务数据或配置，也可单独安装Anchor组件。
-- 长时间安装可在 `tmux` 或 `screen` 会话中执行，避免 SSH 中断影响交互流程。
-
----
-
 ## Installation Experience
-
-### Agent Skill MVP（实验性）
-
-仓库提供 `$anchor-install-server` Skill。用户只需提供一台干净、专用的受支持
-Linux 服务器及 root SSH 登录方式，Agent 会完成环境检查、固定版本引导、基础
-组件安装、独立验收和结果交付。没有域名不会阻塞安装，最终先提供 IP HTTP 站点。
-
-#### 1. 获取 Anchor 并打开仓库
-
-```bash
-git clone https://gitee.com/cdsi/anchor.git
-cd anchor
-```
-
-使用支持仓库级 Agent Skills 的 Codex 打开该目录。Skill 位于
-`.agents/skills/anchor-install-server`，无需单独执行其中的文件。也可以将该
-目录复制到用户级 `~/.agents/skills/`，在其他项目中调用。其他 Agent 需要兼容
-Agent Skills，并具备本地 SSH 和终端执行能力。
-
-#### 2. 准备 root SSH 登录
-
-推荐预先配置公钥，并先确认本机能够连接：
-
-```bash
-ssh root@SERVER_IP
-```
-
-可以把本机私钥的文件路径告诉 Agent，但不要在聊天中粘贴私钥正文、root 密码
-或密钥口令。密码或口令只能由用户在自己控制的安全终端提示中输入；如果当前
-Agent 环境不支持安全输入，应改用公钥登录。
-
-#### 3. 调用 Skill
-
-```text
-$anchor-install-server
-
-请在 SERVER_IP 上安装 Anchor。
-SSH 用户：root
-SSH 端口：22
-认证密钥：本机已有的私钥文件路径
-这是一台我拥有并授权安装的全新专用服务器。
-暂时没有域名，先通过 IP 完成安装。
-```
-
-Agent 会先确认 SSH 主机指纹并执行只读检查，再安装 Nginx、MySQL/MariaDB、
-PHP-FPM 和 WordPress，最后验证服务启动、开机启用、WordPress 数据库连接及
-客户端侧公网访问。发现已有网站、数据库、证书、80/443 端口占用或不明确状态
-时会停止；追加一句“继续”也不会绕过干净服务器门禁。
-
-#### 4. 查看登录凭据
-
-安装结果会返回网站地址、WordPress 后台地址和验收状态。为了避免密码进入
-Agent 记录，凭据值保留在服务器中，由用户在自己的 root SSH 终端查看：
-
-```bash
-cat /root/cdsi-Anchor/password/wordpress.pass
-cat /root/cdsi-Anchor/password/wordpress-beacon.pass
-```
-
-没有有效 HTTPS 时不要通过公网提交这些凭据。域名解析生效后，可以继续调用
-Skill 所在的 Agent：
-
-```text
-请为刚安装的 Anchor 节点配置域名 example.com 和 HTTPS。
-```
-
-Skill 会单独确认域名与证书授权；DNS 或证书暂时不可用不会推翻已完成的基础
-安装。完整支持范围、人工安装方式和故障处理见[完整安装指南](INSTALL.md)。
-
-### 新服务器快速启动
-
-国内服务器使用 Gitee 下载远程引导脚本：
-
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh \
-  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
-```
-
-只有 `wget` 时：
-
-```bash
-wget -qO anchor-bootstrap.sh \
-  https://gitee.com/cdsi/anchor/raw/v0.3.5/bootstrap.sh && \
-  sh anchor-bootstrap.sh
-```
-
-脚本会自动完成以下步骤：
-
-1. 检查操作系统、CPU 架构、systemd、root/sudo 权限和交互终端。
-2. 刷新当前系统默认 APT/DNF/Zypper 仓库的元数据，不改写软件源、不执行全系统升级。
-3. 安装 `bash`、Git、curl、CA 证书和 coreutils。
-4. 自动进入 `install.sh` 的交互菜单。
-
-Anchor 默认保存到 `/root/cdsi-Anchor`。保存前会检查目标路径；同名普通文件、
-非 Git 目录或符号链接均不会被覆盖。已有目录只有在确认是 bootstrap 管理、
-来源可信且工作区干净的 Anchor 仓库后，才会以 fast-forward 方式更新。
-
-脚本下载到本地后再执行，因此用户可以先检查内容；非 root 用户执行时会通过
-`sudo` 请求权限。远程可执行脚本只通过 HTTPS 分发，不提供 HTTP 入口。
-
-GitHub 下载入口：
-
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/cdsi-project/Anchor/v0.3.5/bootstrap.sh \
-  -o anchor-bootstrap.sh && sh anchor-bootstrap.sh
-```
-
-只准备环境和代码、不立即进入安装菜单：
-
-```bash
-sh anchor-bootstrap.sh --no-start
-```
-
-### 手动安装
-
-已有 Git 时仍可手动克隆。国内服务器建议使用 Gitee：
-
-```bash
-git clone https://gitee.com/cdsi/anchor.git Anchor
-cd Anchor
-sudo ./install.sh
-```
-
-也可以使用 GitHub：
-
-```bash
-git clone https://github.com/cdsi-project/Anchor.git Anchor
-cd Anchor
-sudo ./install.sh
-```
 
 The goal is to reduce infrastructure complexity so that owning an independent digital node does not require deep knowledge of Linux, Nginx, PHP, MySQL/MariaDB, SSL, or deployment.
 
@@ -462,12 +468,13 @@ The goal is to reduce infrastructure complexity so that owning an independent di
 sudo ./install.sh
 ```
 
-选择“安装全部”时，Anchor 先安装 Nginx、MySQL/MariaDB、PHP-FPM 和
-WordPress，确保 IP HTTP 站点可用；随后才询问域名。直接按 Enter（或输入流
-结束）会跳过域名与 HTTPS，保留已有 active/pending 状态并继续输出网站地址、
-WordPress 凭据和 Beacon Application Password。输入域名会调用统一的
-`configure-https.sh DOMAIN` 流程；DNS 或证书签发暂时失败只会把可选步骤标记为
-deferred，不会推翻已经完成的基础安装。输入 `ip` 可显式尝试公网 IP HTTPS。
+When **Install All** is selected, Anchor installs Nginx, MySQL/MariaDB,
+PHP-FPM, and WordPress before asking for a domain. Pressing Enter or reaching
+EOF skips domain and HTTPS configuration, preserves the existing active and
+pending state, and still prints the site and credential report. A supplied
+domain uses the shared `configure-https.sh DOMAIN` flow. Temporary DNS or
+certificate failures defer only the optional step and do not undo the completed
+base installation. Enter `ip` to explicitly attempt public-IP HTTPS.
 
 Each script under `scripts/` can also be run independently for focused operation or diagnosis:
 
@@ -486,10 +493,11 @@ sudo bash scripts/install-certbot.sh
 sudo bash scripts/install-wordpress.sh
 ```
 
-这些公开脚本会先检测操作系统，再路由到对应平台目录。
-`scripts/ubuntu/`、`scripts/debian/`、`scripts/centos-stream/` 与
-`scripts/opensuse-leap/` 已实现，并复用 `scripts/common/` 中的组件实现。
-Redis 与 Supervisor 独立脚本目前仍仅支持 Ubuntu。
+These public scripts detect the operating system before routing to the matching
+platform directory. The implemented `scripts/ubuntu/`, `scripts/debian/`,
+`scripts/centos-stream/`, and `scripts/opensuse-leap/` routes reuse the
+component implementations under `scripts/common/`. The standalone Redis and
+Supervisor scripts remain Ubuntu-only.
 
 `check-env.sh` is the active preflight implementation. `configure.sh` is a
 standalone `/etc/cdsi` configuration helper that is not yet called by the main
@@ -546,31 +554,31 @@ Current structure:
 ```text
 Anchor/
 ├── .agents/skills/
-│   └── anchor-install-server/ # 实验性干净服务器安装 Skill
+│   └── anchor-install-server/ # experimental clean-server install Skill
 ├── AGENTS.md
 ├── README.md
 ├── INSTALL.md
 ├── CDSI-Anchor.md
 ├── CDSI_MANIFESTO_ZH_EN.md
-├── bootstrap.sh          # 新服务器远程引导入口，准备工具后调用 install.sh
+├── bootstrap.sh          # remote bootstrap; prepares tools and starts install.sh
 ├── install.sh
 ├── uninstall.sh
 ├── SHA256SUMS
 ├── config/
-│   ├── domain            # 已验证且已生效的域名（本机生成）
-│   └── domain.pending    # DNS 未就绪的候选域名（本机生成）
-├── lib/                  # 平台、DNS、APT/DNF/Zypper、systemd 与公共工具
+│   ├── domain            # verified active domain (generated locally)
+│   └── domain.pending    # pending domain awaiting DNS (generated locally)
+├── lib/                  # platform, DNS, package, systemd, and shared helpers
 ├── scripts/
-│   ├── dispatch.sh       # 操作系统检测与路由
-│   ├── check-env.sh      # 可独立运行的公开入口
+│   ├── dispatch.sh       # operating-system detection and routing
+│   ├── check-env.sh      # independently runnable public entry
 │   ├── configure-domain.sh
 │   ├── configure-https.sh
-│   ├── install-*.sh      # 可独立运行的公开入口
-│   ├── common/           # 共享组件实现
-│   ├── ubuntu/           # 已实现的平台路由
-│   ├── debian/           # 已实现的 Debian 13 平台路由
-│   ├── centos-stream/    # 已实现的平台路由
-│   └── opensuse-leap/    # 已实现的 openSUSE Leap 16.0 平台路由
+│   ├── install-*.sh      # independently runnable public entry
+│   ├── common/           # shared component implementations
+│   ├── ubuntu/           # implemented platform route
+│   ├── debian/           # implemented Debian 13 route
+│   ├── centos-stream/    # implemented platform route
+│   └── opensuse-leap/    # implemented openSUSE Leap 16.0 route
 ├── templates/
 ├── tests/
 ├── docs/
