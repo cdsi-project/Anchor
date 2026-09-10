@@ -223,6 +223,7 @@ of Ubuntu Server, Debian, CentOS Stream, and openSUSE Leap:
 | Implemented in `install.sh` | Preflight, the required Nginx/MySQL-or-MariaDB/PHP-FPM/WordPress stack, optional final domain/HTTPS and Certbot setup, final service/access report, and component uninstall |
 | Implemented support | Ubuntu/Debian APT, CentOS DNF, and openSUSE Zypper/systemd routes, bounded package retries, strict domain DNS activation, pinned SHA-256 verification for CDN downloads, and a Beacon WordPress Application Password |
 | Standalone only | Redis and Supervisor scripts remain available, but are hidden from the main menu and Install All flow |
+| Experimental | Repository-scoped `$anchor-install-server` Skill for installing the base node on one clean, dedicated server over root SSH |
 | Planned | Composer/CDSI Core deployment, the `cdsi` CLI, `cdsi doctor`, resume/update workflows, and complete server backup/restore |
 
 The supported fresh-install runtime is deliberately narrow:
@@ -316,6 +317,74 @@ Certbot 5.4+ 能力。公网 IP 探测受限时可显式传入 `CDSI_SERVER_IP`�
 ---
 
 ## Installation Experience
+
+### Agent Skill MVP（实验性）
+
+仓库提供 `$anchor-install-server` Skill。用户只需提供一台干净、专用的受支持
+Linux 服务器及 root SSH 登录方式，Agent 会完成环境检查、固定版本引导、基础
+组件安装、独立验收和结果交付。没有域名不会阻塞安装，最终先提供 IP HTTP 站点。
+
+#### 1. 获取 Anchor 并打开仓库
+
+```bash
+git clone https://gitee.com/cdsi/anchor.git
+cd anchor
+```
+
+使用支持仓库级 Agent Skills 的 Codex 打开该目录。Skill 位于
+`.agents/skills/anchor-install-server`，无需单独执行其中的文件。也可以将该
+目录复制到用户级 `~/.agents/skills/`，在其他项目中调用。其他 Agent 需要兼容
+Agent Skills，并具备本地 SSH 和终端执行能力。
+
+#### 2. 准备 root SSH 登录
+
+推荐预先配置公钥，并先确认本机能够连接：
+
+```bash
+ssh root@SERVER_IP
+```
+
+可以把本机私钥的文件路径告诉 Agent，但不要在聊天中粘贴私钥正文、root 密码
+或密钥口令。密码或口令只能由用户在自己控制的安全终端提示中输入；如果当前
+Agent 环境不支持安全输入，应改用公钥登录。
+
+#### 3. 调用 Skill
+
+```text
+$anchor-install-server
+
+请在 SERVER_IP 上安装 Anchor。
+SSH 用户：root
+SSH 端口：22
+认证密钥：本机已有的私钥文件路径
+这是一台我拥有并授权安装的全新专用服务器。
+暂时没有域名，先通过 IP 完成安装。
+```
+
+Agent 会先确认 SSH 主机指纹并执行只读检查，再安装 Nginx、MySQL/MariaDB、
+PHP-FPM 和 WordPress，最后验证服务启动、开机启用、WordPress 数据库连接及
+客户端侧公网访问。发现已有网站、数据库、证书、80/443 端口占用或不明确状态
+时会停止；追加一句“继续”也不会绕过干净服务器门禁。
+
+#### 4. 查看登录凭据
+
+安装结果会返回网站地址、WordPress 后台地址和验收状态。为了避免密码进入
+Agent 记录，凭据值保留在服务器中，由用户在自己的 root SSH 终端查看：
+
+```bash
+cat /root/cdsi-Anchor/password/wordpress.pass
+cat /root/cdsi-Anchor/password/wordpress-beacon.pass
+```
+
+没有有效 HTTPS 时不要通过公网提交这些凭据。域名解析生效后，可以继续调用
+Skill 所在的 Agent：
+
+```text
+请为刚安装的 Anchor 节点配置域名 example.com 和 HTTPS。
+```
+
+Skill 会单独确认域名与证书授权；DNS 或证书暂时不可用不会推翻已完成的基础
+安装。完整支持范围、人工安装方式和故障处理见[完整安装指南](INSTALL.md)。
 
 ### 新服务器快速启动
 
@@ -476,6 +545,8 @@ Current structure:
 
 ```text
 Anchor/
+├── .agents/skills/
+│   └── anchor-install-server/ # 实验性干净服务器安装 Skill
 ├── AGENTS.md
 ├── README.md
 ├── INSTALL.md

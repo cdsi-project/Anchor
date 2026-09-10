@@ -163,6 +163,8 @@ The current working baseline already includes:
 - CDN SHA-256 verification
 - final site, WordPress administrator, and Beacon Application Password output
 - component and full uninstall workflows
+- an experimental repository-scoped Agent Skill that installs the base node on
+  one clean, dedicated server through the existing public script entries
 
 Redis and Supervisor remain independently runnable compatibility scripts, but
 they are Ubuntu-only and intentionally hidden from the main menu and Install
@@ -322,6 +324,8 @@ Current installer structure:
 
 ```text
 Anchor/
+├── .agents/skills/
+│   └── anchor-install-server/     # experimental clean-server Agent workflow
 ├── bootstrap.sh                  # remote new-server bootstrap
 ├── install.sh
 ├── uninstall.sh
@@ -373,6 +377,13 @@ The `ubuntu/`, `debian/`, `centos-stream/`, and `opensuse-leap/` routes are
 implemented. Their wrappers invoke the shared implementations under
 `scripts/common/`. Shared primitives belong under `lib/`. Keep these layers
 small and responsibility-focused.
+
+The experimental `.agents/skills/anchor-install-server` workflow is an Agent
+orchestration entry, not another installer implementation. It must pin and
+verify a reviewed Anchor release, perform a read-only clean-server gate before
+bootstrap, and invoke the existing public component scripts in the same base
+order as Install All. It must not copy component logic, broaden platform
+support, expose credentials to Agent transcripts, or automate uninstall.
 
 The Install All path must establish the usable base site before asking for a
 domain: Nginx, database, PHP-FPM, then WordPress. Domain activation and HTTPS are
@@ -952,6 +963,12 @@ Standalone but excluded from default orchestration:
 ```text
 Redis
 Supervisor
+```
+
+Experimental:
+
+```text
+Repository-scoped anchor-install-server Agent Skill for a clean, dedicated host
 ```
 
 Not implemented:

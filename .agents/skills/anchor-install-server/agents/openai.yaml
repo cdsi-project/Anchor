@@ -1,0 +1,4 @@
+interface:
+  display_name: "Anchor Server Installer"
+  short_description: "Install Anchor on a clean supported Linux server"
+  default_prompt: "Use $anchor-install-server to install Anchor on my clean Linux server."
